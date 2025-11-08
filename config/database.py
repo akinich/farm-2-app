@@ -129,28 +129,37 @@ class UserDB:
     def get_all_users() -> List[Dict]:
         """
         Get all users with their profiles and roles
-        
+    
         Returns:
             List of user dictionaries with profile and role info
         """
         try:
             db = Database.get_client()
-            
+        
             # Join user_profiles with roles
             response = db.table('user_profiles') \
                 .select('*, roles(role_name)') \
                 .execute()
-            
+        
             if response.data:
                 users = []
                 for profile in response.data:
                     # Get email from auth.users
+                    email = 'Unknown'
                     try:
-                        user_response = db.auth.admin.get_user_by_id(profile['id'])
-                        email = user_response.user.email if user_response.user else 'Unknown'
-                    except:
-                        email = 'Unknown'
-                    
+                        # Try to get user from auth
+                        auth_user = db.auth.admin.get_user_by_id(profile['id'])
+                        if auth_user and hasattr(auth_user, 'user'):
+                            email = auth_user.user.email
+                        elif auth_user and hasattr(auth_user, 'email'):
+                            email = auth_user.email
+                    except Exception as e:
+                        # If auth fetch fails, try to get from metadata
+                        print(f"Could not fetch email for user {profile['id']}: {str(e)}")
+                        # Fallback: check if email is stored anywhere in profile
+                        if 'email' in profile:
+                            email = profile['email']
+                
                     users.append({
                         'id': profile['id'],
                         'email': email,
@@ -161,15 +170,15 @@ class UserDB:
                         'created_at': profile.get('created_at'),
                         'updated_at': profile.get('updated_at')
                     })
-                
+            
                 return users
-            
+        
             return []
-            
+        
         except Exception as e:
             st.error(f"Error fetching users: {str(e)}")
             return []
-    
+        
     @staticmethod
     def get_non_admin_users() -> List[Dict]:
         """Get all non-admin users (for permission management)"""
