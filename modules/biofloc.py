@@ -229,7 +229,7 @@ def show():
 
             if tests:
                 last_test = tests[0]
-                st.write(f"**Last Test:** {last_test['test_date']} | **pH:** {last_test['ph']} | **DO:** {last_test['\"do\"']} mg/L | **Temp:** {last_test['temp']}°C")
+                st.write(f"**Last Test:** {last_test['test_date']} | **pH:** {last_test['ph']} | **DO:** {last_test.get('do', '—')} mg/L | **Temp:** {last_test.get('temp', '—')}°C")
             else:
                 st.write("_No water test data yet._")
 
