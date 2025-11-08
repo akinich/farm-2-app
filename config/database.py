@@ -2,20 +2,18 @@
 Database Configuration and Connection Utilities for Supabase
 Farm Management System
 
-VERSION: 1.2.1
+VERSION: 1.2.2
 DATE: November 8, 2025
 
-CHANGES FROM V1.2.0:
-- Cleaned up BioflocDB integration (single source)
-- Added "do" keyword remapping for PostgreSQL safety
-- Added detailed docstrings to BioflocDB
-- Improved consistency with new module architecture (Phase 2 standard)
+CHANGES FROM V1.2.1:
+- Fixed BioflocDB.add_water_test() to use plain 'do' column (no quotes)
+- Normalized column key handling for Supabase/Postgres compatibility
+- Verified RLS-safe and module-consistent structure
 """
 
 import streamlit as st
 from supabase import create_client, Client
 from typing import Optional, Dict, List, Any
-import json
 import secrets
 import string
 from datetime import datetime, timedelta
@@ -27,7 +25,6 @@ from datetime import datetime, timedelta
 
 class Database:
     """Handles all database operations with Supabase"""
-
     _instance: Optional[Client] = None
 
     @classmethod
@@ -53,9 +50,165 @@ class Database:
 # USER, ROLE & PERMISSION MANAGEMENT
 # ============================================================
 
-# (All your existing classes remain exactly the same)
-# UserDB, RoleDB, UserPermissionDB, ModuleDB, ActivityLogger
-# No edits made here.
+class UserDB:
+    """User-related database operations"""
+
+    @staticmethod
+    def get_user_profile(user_id: str) -> Optional[Dict]:
+        """Get user profile with role information"""
+        try:
+            db = Database.get_client()
+            response = db.table('user_details').select('*').eq('id', user_id).execute()
+            return response.data[0] if response.data else None
+        except Exception as e:
+            st.error(f"Error fetching user profile: {str(e)}")
+            return None
+
+    @staticmethod
+    def get_user_modules(user_id: str) -> List[Dict]:
+        """Get all modules accessible to a user"""
+        try:
+            db = Database.get_client()
+            response = (
+                db.table('user_accessible_modules')
+                .select('*')
+                .eq('user_id', user_id)
+                .order('display_order')
+                .execute()
+            )
+            return response.data if response.data else []
+        except Exception as e:
+            st.error(f"Error fetching user modules: {str(e)}")
+            return []
+
+
+class RoleDB:
+    """Role and permission related database operations"""
+
+    @staticmethod
+    def get_all_roles() -> List[Dict]:
+        """Get all available roles (Admin and User only)"""
+        try:
+            db = Database.get_client()
+            response = (
+                db.table('roles')
+                .select('*')
+                .in_('role_name', ['Admin', 'User'])
+                .execute()
+            )
+            return response.data if response.data else []
+        except Exception as e:
+            st.error(f"Error fetching roles: {str(e)}")
+            return []
+
+
+class UserPermissionDB:
+    """User-specific module permission operations"""
+
+    @staticmethod
+    def has_module_access(user_id: str, module_key: str) -> bool:
+        """Check if a specific user has access to a specific module"""
+        try:
+            db = Database.get_client()
+
+            # Check if user is admin
+            user_profile = UserDB.get_user_profile(user_id)
+            if user_profile and user_profile.get('role_name') == 'Admin':
+                return True
+
+            # Check module permission
+            response = (
+                db.table('user_accessible_modules')
+                .select('module_key')
+                .eq('user_id', user_id)
+                .eq('module_key', module_key)
+                .execute()
+            )
+            return len(response.data) > 0 if response.data else False
+        except Exception as e:
+            st.error(f"Error checking module access: {str(e)}")
+            return False
+
+
+class ModuleDB:
+    """Module related database operations"""
+
+    @staticmethod
+    def get_all_modules() -> List[Dict]:
+        """Get all available modules"""
+        try:
+            db = Database.get_client()
+            response = (
+                db.table('modules')
+                .select('*')
+                .order('display_order')
+                .execute()
+            )
+            return response.data if response.data else []
+        except Exception as e:
+            st.error(f"Error fetching modules: {str(e)}")
+            return []
+
+    @staticmethod
+    def get_active_modules() -> List[Dict]:
+        """Get all active modules"""
+        try:
+            db = Database.get_client()
+            response = (
+                db.table('modules')
+                .select('*')
+                .eq('is_active', True)
+                .order('display_order')
+                .execute()
+            )
+            return response.data if response.data else []
+        except Exception as e:
+            st.error(f"Error fetching active modules: {str(e)}")
+            return []
+
+
+# ============================================================
+# ACTIVITY LOGGER
+# ============================================================
+
+class ActivityLogger:
+    """Activity logging database operations"""
+
+    @staticmethod
+    def log(
+        user_id: str,
+        action_type: str,
+        module_key: str = None,
+        description: str = None,
+        metadata: Dict = None,
+        success: bool = True
+    ) -> bool:
+        """Log user activity"""
+        try:
+            db = Database.get_client()
+
+            # Try to fetch user email for audit
+            try:
+                user_response = db.auth.admin.get_user_by_id(user_id)
+                user_email = user_response.user.email if user_response.user else 'Unknown'
+            except Exception:
+                user_email = 'Unknown'
+
+            log_data = {
+                'user_id': user_id,
+                'user_email': user_email,
+                'action_type': action_type,
+                'description': description,
+                'module_key': module_key,
+                'success': success,
+                'metadata': metadata,
+            }
+
+            db.table('activity_logs').insert(log_data).execute()
+            return True
+        except Exception as e:
+            print(f"Error logging activity: {str(e)}")
+            return False
 
 
 # ============================================================
@@ -66,10 +219,10 @@ class BioflocDB:
     """
     Database operations for Biofloc Aquaculture Module
 
-    VERSION: 1.0.1
+    VERSION: 1.0.2
     CHANGES:
-    - Added "do" remapping for safe insertion
-    - Unified CRUD functions for water tests, growth, and feed logs
+    - Updated add_water_test() to use plain 'do' column
+    - Added metadata logging for inserts
     """
 
     @staticmethod
@@ -89,12 +242,14 @@ class BioflocDB:
         try:
             db = Database.get_client()
 
-            # Fix reserved keyword "do"
-            if "do" in data:
-                data['"do"'] = data.pop("do")
+            # Normalize DO key if user entered it with quotes
+            if "do" not in data and '"do"' in data:
+                data["do"] = data.pop('"do"')
 
+            # Insert record
             db.table('biofloc_water_tests').insert(data).execute()
 
+            # Log success
             ActivityLogger.log(
                 user_id=user_id,
                 action_type='data_entry',
@@ -201,3 +356,5 @@ class BioflocDB:
         except Exception as e:
             st.error(f"Error fetching feed logs: {e}")
             return []
+
+
