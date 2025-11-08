@@ -2,6 +2,11 @@
 Database Configuration and Connection Utilities for Supabase
 Farm Management System
 
+VERSION: 1.2.0
+DATE: November 8, 2025
+CHANGES FROM V1.1.0:
+- added different classes for biofloc module
+
 VERSION: 1.1.0
 DATE: November 8, 2025
 CHANGES FROM V1.0.0:
@@ -769,3 +774,84 @@ class ActivityLogger:
             List of log dictionaries
         """
         return ActivityLogger.get_logs(days=days, module_key=module_key)
+
+
+
+class BioflocDB:
+    """Database operations for Biofloc Module"""
+
+    @staticmethod
+    def get_tanks() -> List[Dict]:
+        try:
+            db = Database.get_client()
+            resp = db.table('biofloc_tanks').select('*').eq('is_active', True).execute()
+            return resp.data or []
+        except Exception as e:
+            st.error(f"Error fetching tanks: {e}")
+            return []
+
+    @staticmethod
+    def add_water_test(data: Dict, user_id: str) -> bool:
+        try:
+            db = Database.get_client()
+            db.table('biofloc_water_tests').insert(data).execute()
+            ActivityLogger.log(user_id, 'data_entry', 'biofloc', f"Added water test for tank {data.get('tank_id')}")
+            return True
+        except Exception as e:
+            st.error(f"Error adding water test: {e}")
+            ActivityLogger.log(user_id, 'data_error', 'biofloc', str(e), success=False)
+            return False
+
+    @staticmethod
+    def get_water_tests(tank_id: int) -> List[Dict]:
+        try:
+            db = Database.get_client()
+            resp = db.table('biofloc_water_tests').select('*').eq('tank_id', tank_id).order('test_date', desc=True).execute()
+            return resp.data or []
+        except Exception as e:
+            st.error(f"Error fetching water tests: {e}")
+            return []
+
+    @staticmethod
+    def add_growth_record(data: Dict, user_id: str) -> bool:
+        try:
+            db = Database.get_client()
+            db.table('biofloc_growth_records').insert(data).execute()
+            ActivityLogger.log(user_id, 'data_entry', 'biofloc', f"Added growth record for tank {data.get('tank_id')}")
+            return True
+        except Exception as e:
+            st.error(f"Error adding growth record: {e}")
+            ActivityLogger.log(user_id, 'data_error', 'biofloc', str(e), success=False)
+            return False
+
+    @staticmethod
+    def get_growth_records(tank_id: int) -> List[Dict]:
+        try:
+            db = Database.get_client()
+            resp = db.table('biofloc_growth_records').select('*').eq('tank_id', tank_id).order('record_date', desc=True).execute()
+            return resp.data or []
+        except Exception as e:
+            st.error(f"Error fetching growth records: {e}")
+            return []
+
+    @staticmethod
+    def add_feed_log(data: Dict, user_id: str) -> bool:
+        try:
+            db = Database.get_client()
+            db.table('biofloc_feed_logs').insert(data).execute()
+            ActivityLogger.log(user_id, 'data_entry', 'biofloc', f"Added feed log for tank {data.get('tank_id')}")
+            return True
+        except Exception as e:
+            st.error(f"Error adding feed log: {e}")
+            ActivityLogger.log(user_id, 'data_error', 'biofloc', str(e), success=False)
+            return False
+
+    @staticmethod
+    def get_feed_logs(tank_id: int) -> List[Dict]:
+        try:
+            db = Database.get_client()
+            resp = db.table('biofloc_feed_logs').select('*').eq('tank_id', tank_id).order('feed_date', desc=True).execute()
+            return resp.data or []
+        except Exception as e:
+            st.error(f"Error fetching feed logs: {e}")
+            return []
