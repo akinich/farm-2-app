@@ -201,7 +201,7 @@ def show_current_inventory(username: str, is_admin: bool):
                                    ["All", "Good", "Low", "Critical"], key="inv_stock")
     
     with col4:
-        if st.button("🔄 Refresh", use_container_width=True):
+        if st.button("🔄 Refresh", use_container_width=True, key="refresh_inventory"):
             st.rerun()
     
     # Load inventory
@@ -270,12 +270,12 @@ def show_current_inventory(username: str, is_admin: bool):
         st.info("💡 Admin can edit items in Admin Panel → Module Management")
     
     with col2:
-        if st.button("📥 Export to Excel", use_container_width=True):
+        if st.button("📥 Export to Excel", use_container_width=True, key="export_inventory_excel"):
             export_inventory_excel(df_display, "current_inventory")
     
     with col3:
         if is_admin:
-            if st.button("➕ Add New Item", use_container_width=True, type="primary"):
+            if st.button("➕ Add New Item", use_container_width=True, type="primary", key="add_new_item_btn"):
                 st.session_state['show_add_item_form'] = True
     
     # Add item form (admin only)
@@ -652,7 +652,7 @@ def show_po_list(is_admin: bool):
         days = st.number_input("Days to show", min_value=30, max_value=365, value=90)
     
     with col3:
-        if st.button("🔄 Refresh"):
+        if st.button("🔄 Refresh", key="refresh_po_list"):
             st.rerun()
     
     # Load POs
@@ -725,7 +725,7 @@ def show_create_po(username: str):
     
     with col4:
         st.markdown("<br>", unsafe_allow_html=True)
-        if st.button("➕ Add", use_container_width=True):
+        if st.button("➕ Add", use_container_width=True, key="add_po_item"):
             po_item = {
                 'item_id': item['id'],
                 'item_name': item['item_name'],
@@ -756,12 +756,12 @@ def show_create_po(username: str):
         col1, col2, col3 = st.columns([2, 1, 1])
         
         with col2:
-            if st.button("🗑️ Clear Items", use_container_width=True):
+            if st.button("🗑️ Clear Items", use_container_width=True, key="clear_po_items"):
                 st.session_state.po_items = []
                 st.rerun()
         
         with col3:
-            if st.button("✅ Create PO", type="primary", use_container_width=True):
+            if st.button("✅ Create PO", type="primary", use_container_width=True, key="create_po_btn"):
                 po_data = {
                     'po_number': po_number,
                     'supplier_id': supplier_options[supplier],
@@ -890,7 +890,7 @@ def show_transaction_history(is_admin: bool):
         module = st.selectbox("Module", modules)
     
     with col4:
-        if st.button("🔄 Refresh", use_container_width=True):
+        if st.button("🔄 Refresh", use_container_width=True, key="refresh_tx_history"):
             st.rerun()
     
     # Load transactions
@@ -930,7 +930,7 @@ def show_transaction_history(is_admin: bool):
     col1, col2, col3 = st.columns([2, 1, 1])
     
     with col2:
-        if st.button("📥 Export to CSV", use_container_width=True):
+        if st.button("📥 Export to CSV", use_container_width=True, key="export_tx_csv"):
             csv = display_df.to_csv(index=False)
             st.download_button(
                 label="Download CSV",
@@ -1090,17 +1090,17 @@ def show_analytics():
     col1, col2, col3 = st.columns(3)
     
     with col1:
-        if st.button("📊 Complete Inventory", use_container_width=True):
+        if st.button("📊 Complete Inventory", use_container_width=True, key="export_complete_inv"):
             items = InventoryDB.get_all_items()
             export_inventory_excel(pd.DataFrame(items), "complete_inventory")
     
     with col2:
-        if st.button("📉 Low Stock Report", use_container_width=True):
+        if st.button("📉 Low Stock Report", use_container_width=True, key="export_low_stock"):
             low_stock = InventoryDB.get_low_stock_items()
             export_inventory_excel(pd.DataFrame(low_stock), "low_stock_report")
     
     with col3:
-        if st.button("⏰ Expiry Report", use_container_width=True):
+        if st.button("⏰ Expiry Report", use_container_width=True, key="export_expiry"):
             expiring = InventoryDB.get_expiring_items(days_ahead=60)
             export_inventory_excel(pd.DataFrame(expiring), "expiry_report")
 
