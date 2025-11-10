@@ -1321,6 +1321,8 @@ def show_add_master_item(username: str):
     
     st.markdown("#### ➕ Add New Master Item")
     
+    user_id = st.session_state.user.get('id') if 'user' in st.session_state and st.session_state.user else None
+    
     with st.form("add_master_item_form", clear_on_submit=True):
         col1, col2 = st.columns(2)
         
@@ -1393,6 +1395,7 @@ def show_add_master_item(username: str):
                         specifications=specifications.strip() if specifications else None,
                         notes=notes.strip() if notes else None,
                         username=username,
+                        user_id=user_id,
                         **supplier_kwargs
                     )
             
