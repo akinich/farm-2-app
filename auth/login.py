@@ -2,7 +2,7 @@
 Login Page and Authentication UI
 Farm Management System
 
-VERSION: 1.1.4 - Fixed button-in-form error with auto-redirect
+VERSION: 1.2.0 - Added Forgot Password flow with in-app email request
 """
 import streamlit as st
 from auth.session import SessionManager
@@ -12,49 +12,26 @@ def show_login_page():
     """Display login page"""
 
     # Check for password recovery tokens in URL
-    # Use JavaScript to extract hash parameters since Streamlit can't access them directly
     recovery_token = extract_recovery_token()
 
-    # Debug info and manual workaround
-    query_params = st.query_params
+    # Check if user wants to reset password
+    if 'show_forgot_password' not in st.session_state:
+        st.session_state.show_forgot_password = False
 
-    # Check if URL has recovery hash but wasn't converted to query params
-    has_recovery_hash = False
-    js_detection = """
-    <script>
-    if (window.location.hash.includes('type=recovery')) {
-        // Signal to Streamlit that we have a hash
-        window.parent.postMessage({type: 'recovery_hash_detected'}, '*');
-    }
-    </script>
-    """
-    st.markdown(js_detection, unsafe_allow_html=True)
-
-    # Show debug info if we detect recovery-related params
-    if 'access_token' in query_params or 'recovery_token' in st.session_state:
-        st.sidebar.write("🔍 Debug Info:")
-        st.sidebar.write(f"Query params: {dict(query_params)}")
-        st.sidebar.write(f"Token in session: {'recovery_token' in st.session_state}")
-        st.sidebar.write(f"Token found: {recovery_token is not None}")
-
-    # Center the login form
+    # Center the form
     col1, col2, col3 = st.columns([1, 2, 1])
 
     with col2:
         # If there's a recovery token, show password reset form
         if recovery_token:
             show_password_reset_form(recovery_token)
+        # If user clicked forgot password, show email input
+        elif st.session_state.show_forgot_password:
+            show_forgot_password_form()
         else:
             # Show normal login form
             st.markdown("# 🌾 Farm Management Login")
             st.markdown("---")
-
-            # Show manual recovery link instructions if needed
-            st.info("💡 **Password Reset Link?** If you clicked a password reset link and it didn't work, try this:\n\n"
-                   "1. Look at your browser's address bar\n"
-                   "2. If you see a `#` in the URL, replace it with `?`\n"
-                   "3. Press Enter to reload the page\n\n"
-                   "Example: Change `...app/#access_token=...` to `...app/?access_token=...`")
 
             with st.form("login_form"):
                 email = st.text_input("Email", placeholder="your.email@farm.com")
@@ -67,50 +44,79 @@ def show_login_page():
                     else:
                         handle_login(email, password)
 
+            # Forgot password link
+            st.markdown("---")
+            col_a, col_b, col_c = st.columns([1, 1, 1])
+            with col_b:
+                if st.button("🔑 Forgot Password?", use_container_width=True):
+                    st.session_state.show_forgot_password = True
+                    st.rerun()
+
+
+def show_forgot_password_form():
+    """Display forgot password form"""
+    st.markdown("# 🔑 Forgot Password")
+    st.markdown("---")
+    st.info("Enter your email address and we'll send you a password reset link")
+
+    with st.form("forgot_password_form"):
+        email = st.text_input("Email Address", placeholder="your.email@farm.com")
+        submit = st.form_submit_button("Send Reset Link", use_container_width=True, type="primary")
+
+        if submit:
+            if not email:
+                st.error("Please enter your email address")
+            else:
+                handle_forgot_password(email)
+
+    # Back to login link
+    st.markdown("---")
+    if st.button("← Back to Login", use_container_width=True):
+        st.session_state.show_forgot_password = False
+        st.rerun()
+
+
+def handle_forgot_password(email: str):
+    """Send password reset email"""
+    from config.database import Database
+
+    with st.spinner("Sending reset link..."):
+        try:
+            db = Database.get_client()
+
+            # Send password reset email
+            db.auth.reset_password_email(email)
+
+            st.success("✅ Password reset link sent! Check your email.")
+            st.info("**Important:** After clicking the reset link in your email:\n\n"
+                   "1. Look at your browser's address bar\n"
+                   "2. If you see a `#` in the URL, **replace it with `?`**\n"
+                   "3. Press Enter to reload the page\n"
+                   "4. The password reset form will appear\n\n"
+                   "Example: Change `...app/#access_token=...` to `...app/?access_token=...`")
+
+        except Exception as e:
+            error_msg = str(e)
+            if "User not found" in error_msg or "not found" in error_msg.lower():
+                st.error("❌ No account found with this email address")
+            else:
+                st.error(f"❌ Error sending reset link: {error_msg}")
+
 
 def extract_recovery_token():
-    """Extract recovery token from URL hash using JavaScript"""
+    """Extract recovery token from URL query params"""
 
     # Check if we already extracted the token in session state
     if 'recovery_token' in st.session_state and st.session_state.recovery_token:
         return st.session_state.recovery_token
 
-    # Check if token is in query params (after JavaScript redirect)
+    # Check if token is in query params (user manually converted # to ?)
     query_params = st.query_params
     if 'access_token' in query_params and query_params.get('type') == 'recovery':
         token = query_params['access_token']
         # Store in session state
         st.session_state.recovery_token = token
         return token
-
-    # Try injecting JavaScript via markdown (more reliable in Streamlit Cloud)
-    js_code = """
-    <script>
-    (function() {
-        const hash = window.location.hash;
-
-        if (hash && hash.includes('access_token') && hash.includes('type=recovery')) {
-            // Parse hash parameters
-            const params = new URLSearchParams(hash.substring(1));
-            const accessToken = params.get('access_token');
-            const type = params.get('type');
-
-            if (type === 'recovery' && accessToken) {
-                // Build new URL with query params
-                const baseUrl = window.location.origin + window.location.pathname;
-                const newUrl = baseUrl + '?access_token=' + encodeURIComponent(accessToken) + '&type=recovery';
-
-                // Redirect immediately
-                window.location.replace(newUrl);
-            }
-        }
-    })();
-    </script>
-    """
-
-    # Try both injection methods for reliability
-    st.markdown(js_code, unsafe_allow_html=True)
-    components.html(js_code, height=0)
 
     return None
 
