@@ -701,19 +701,21 @@ class ActivityLogger:
     """
     
     @staticmethod
-    def log(user_id: str, action_type: str, module_key: str = None, 
+    def log(user_id: str, action_type: str, module_key: str = None,
             description: str = None, metadata: Dict = None, success: bool = True) -> bool:
         """Log user activity"""
         try:
             db = Database.get_client()
-            
+
             # Get user email
             try:
                 user_response = db.auth.admin.get_user_by_id(user_id)
                 user_email = user_response.user.email if user_response.user else 'Unknown'
-            except:
+            except Exception as email_error:
+                # If getting email fails, use a fallback
                 user_email = 'Unknown'
-            
+                print(f"Warning: Could not fetch user email: {str(email_error)}")
+
             log_data = {
                 'user_id': user_id,
                 'user_email': user_email,
@@ -723,12 +725,16 @@ class ActivityLogger:
                 'success': success,
                 'metadata': metadata
             }
-            
+
+            # Insert with service role (bypasses RLS)
             db.table('activity_logs').insert(log_data).execute()
             return True
         except Exception as e:
-            # Don't show error to user for logging failures
-            print(f"Error logging activity: {str(e)}")
+            # Show error to help debug (temporary - remove after fixing)
+            error_msg = f"Error logging activity: {str(e)}"
+            print(error_msg)
+            # Showing errors in Streamlit for debugging
+            st.warning(f"⚠️ Activity log failed: {str(e)}")
             return False
     
     @staticmethod
