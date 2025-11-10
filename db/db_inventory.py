@@ -1,8 +1,24 @@
 """
-Inventory Database Operations V2.0.0
-Complete rewrite with Item Master List + Inventory Batches architecture
+Inventory Database Operations V2.1.0
+Added missing methods for inventory.py v2.1.0 compatibility
 
 VERSION HISTORY:
+2.1.0 - Added missing helper methods for UI compatibility - 10/11/25
+      ADDITIONS:
+      - get_inventory_summary() - Dashboard summary statistics
+      - get_recent_transactions() - Recent transaction wrapper
+      - get_all_categories() - Category list helper
+      - get_recent_adjustments() - Recent adjustments wrapper
+      - get_all_purchase_orders() - PO list wrapper
+      - get_purchase_orders_by_status() - Filtered PO wrapper
+      - create_purchase_order() - Simplified PO creation
+      - get_transaction_history() - History wrapper with filters
+      - get_module_consumption() - Module consumption wrapper
+      - get_all_suppliers() - Supplier list wrapper (alias)
+      FIXES:
+      - All methods now compatible with inventory.py v2.1.0
+      - Preserved all v2.0.0 functionality
+      
 2.0.0 - Complete architectural rebuild - 10/11/25
       NEW ARCHITECTURE:
       - Item Master List (templates, no stock qty)
@@ -93,13 +109,23 @@ class InventoryDB:
             return []
     
     @staticmethod
-    def add_master_item(item_data: Dict, user_id: str) -> bool:
-        """Add new item to master list (admin only)"""
+    def add_master_item(item_data: Dict = None, user_id: str = None, **kwargs) -> bool:
+        """
+        Add new item to master list (admin only)
+        Supports both dict and keyword arguments for compatibility
+        """
         try:
             db = Database.get_client()
             
-            item_data['created_by'] = user_id
+            # Handle both calling styles
+            if item_data is None:
+                item_data = kwargs
+            
+            item_data['created_by'] = user_id or kwargs.get('username')
             item_data['current_qty'] = 0  # Always starts at 0
+            
+            # Remove username if present (not a database column)
+            item_data.pop('username', None)
             
             db.table('item_master').insert(item_data).execute()
             return True
@@ -109,12 +135,24 @@ class InventoryDB:
             return False
     
     @staticmethod
-    def update_master_item(item_id: int, updates: Dict) -> bool:
-        """Update master item details"""
+    def update_master_item(item_id: int = None, updates: Dict = None, item_master_id: int = None, **kwargs) -> bool:
+        """
+        Update master item details
+        Supports both v2.0.0 and v2.1.0 calling styles
+        """
         try:
             db = Database.get_client()
             
+            # Handle different parameter names
+            item_id = item_id or item_master_id
+            if updates is None:
+                updates = kwargs
+            
             updates['updated_at'] = datetime.now().isoformat()
+            
+            # Remove non-database fields
+            updates.pop('username', None)
+            updates.pop('item_master_id', None)
             
             db.table('item_master') \
                 .update(updates) \
@@ -178,6 +216,23 @@ class InventoryDB:
                 
                 # Calculate value
                 batch['batch_value'] = batch['remaining_qty'] * batch['unit_cost']
+                
+                # Add quantity alias for compatibility
+                batch['quantity'] = batch.get('quantity_purchased', batch['remaining_qty'])
+                
+                # Add status
+                if batch['remaining_qty'] <= 0:
+                    batch['status'] = 'depleted'
+                elif batch.get('expiry_date'):
+                    expiry = datetime.fromisoformat(str(batch['expiry_date'])).date() if isinstance(batch['expiry_date'], str) else batch['expiry_date']
+                    if expiry < date.today():
+                        batch['status'] = 'expired'
+                    elif expiry <= date.today() + timedelta(days=7):
+                        batch['status'] = 'expiring_soon'
+                    else:
+                        batch['status'] = 'active'
+                else:
+                    batch['status'] = 'active'
             
             return batches
         
@@ -192,10 +247,11 @@ class InventoryDB:
         quantity: float,
         unit_cost: float,
         purchase_date: date,
-        expiry_date: date,
-        supplier_id: int,
-        user_id: str,
-        username: str,
+        expiry_date: date = None,
+        supplier_id: int = None,
+        supplier_name: str = None,
+        user_id: str = None,
+        username: str = None,
         po_number: str = None,
         notes: str = None
     ) -> bool:
@@ -206,6 +262,16 @@ class InventoryDB:
         try:
             db = Database.get_client()
             
+            # Get supplier_id from name if provided
+            if supplier_name and not supplier_id:
+                supplier_response = db.table('suppliers') \
+                    .select('id') \
+                    .eq('supplier_name', supplier_name) \
+                    .execute()
+                
+                if supplier_response.data:
+                    supplier_id = supplier_response.data[0]['id']
+            
             # Insert batch
             batch_data = {
                 'item_master_id': item_master_id,
@@ -213,8 +279,8 @@ class InventoryDB:
                 'quantity_purchased': quantity,
                 'remaining_qty': quantity,
                 'unit_cost': unit_cost,
-                'purchase_date': purchase_date.isoformat(),
-                'expiry_date': expiry_date.isoformat() if expiry_date else None,
+                'purchase_date': purchase_date.isoformat() if isinstance(purchase_date, date) else purchase_date,
+                'expiry_date': expiry_date.isoformat() if expiry_date and isinstance(expiry_date, date) else expiry_date,
                 'supplier_id': supplier_id,
                 'po_number': po_number,
                 'notes': notes,
@@ -399,9 +465,11 @@ class InventoryDB:
         adjustment_type: str,
         quantity: float,
         reason: str,
-        user_id: str,
-        username: str,
+        user_id: str = None,
+        username: str = None,
         batch_id: int = None,
+        reference_id: str = None,
+        adjustment_date: date = None,
         notes: str = None
     ) -> bool:
         """Log stock adjustment (wastage, damage, etc.)"""
@@ -440,7 +508,7 @@ class InventoryDB:
             new_qty = old_qty - abs(quantity)
             
             # Log adjustment
-            db.table('stock_adjustments').insert({
+            adjustment_data = {
                 'item_master_id': item_master_id,
                 'batch_id': batch_id,
                 'adjustment_type': adjustment_type,
@@ -450,8 +518,13 @@ class InventoryDB:
                 'reason': reason,
                 'adjusted_by': user_id,
                 'username': username,
-                'notes': notes
-            }).execute()
+                'notes': notes or reason
+            }
+            
+            if adjustment_date:
+                adjustment_data['adjustment_date'] = adjustment_date.isoformat() if isinstance(adjustment_date, date) else adjustment_date
+            
+            db.table('stock_adjustments').insert(adjustment_data).execute()
             
             # Log transaction
             db.table('inventory_transactions').insert({
@@ -496,6 +569,30 @@ class InventoryDB:
             return []
     
     @staticmethod
+    def get_all_categories() -> List[str]:
+        """
+        Get list of category names (for UI dropdowns)
+        NEW in v2.1.0
+        """
+        try:
+            db = Database.get_client()
+            
+            # Get unique categories from item_master
+            response = db.table('item_master') \
+                .select('category') \
+                .execute()
+            
+            if response.data:
+                categories = list(set([item['category'] for item in response.data if item.get('category')]))
+                return sorted(categories)
+            
+            return []
+        
+        except Exception as e:
+            st.error(f"Error fetching categories: {str(e)}")
+            return []
+    
+    @staticmethod
     def get_suppliers(active_only: bool = True) -> List[Dict]:
         """Get all suppliers"""
         try:
@@ -514,10 +611,25 @@ class InventoryDB:
             return []
     
     @staticmethod
-    def add_supplier(supplier_data: Dict) -> bool:
+    def get_all_suppliers(active_only: bool = True) -> List[Dict]:
+        """
+        Alias for get_suppliers (for UI compatibility)
+        NEW in v2.1.0
+        """
+        return InventoryDB.get_suppliers(active_only=active_only)
+    
+    @staticmethod
+    def add_supplier(supplier_data: Dict = None, **kwargs) -> bool:
         """Add new supplier"""
         try:
             db = Database.get_client()
+            
+            # Handle both calling styles
+            if supplier_data is None:
+                supplier_data = kwargs
+            
+            # Remove non-database fields
+            supplier_data.pop('username', None)
             
             db.table('suppliers').insert(supplier_data).execute()
             return True
@@ -618,11 +730,48 @@ class InventoryDB:
                     tx['batch_number'] = tx['inventory_batches']['batch_number']
                 else:
                     tx['batch_number'] = ''
+                
+                # Add aliases for compatibility
+                tx['quantity'] = abs(tx.get('quantity_change', 0))
+                tx['reference'] = tx.get('module_reference') or tx.get('po_number') or ''
+                tx['performed_by'] = tx.get('username', 'Unknown')
             
             return txs
         
         except Exception as e:
             st.error(f"Error fetching transactions: {str(e)}")
+            return []
+    
+    @staticmethod
+    def get_recent_transactions(limit: int = 10) -> List[Dict]:
+        """
+        Get recent transactions (wrapper for UI)
+        NEW in v2.1.0
+        """
+        transactions = InventoryDB.get_transactions(days=7)
+        return transactions[:limit] if transactions else []
+    
+    @staticmethod
+    def get_transaction_history(
+        days_back: int = 30,
+        transaction_type: str = None,
+        item_name: str = None
+    ) -> List[Dict]:
+        """
+        Get filtered transaction history (wrapper for UI)
+        NEW in v2.1.0
+        """
+        try:
+            transactions = InventoryDB.get_transactions(days=days_back, transaction_type=transaction_type)
+            
+            # Filter by item name if provided
+            if item_name:
+                transactions = [t for t in transactions if t.get('item_name') == item_name]
+            
+            return transactions
+        
+        except Exception as e:
+            st.error(f"Error fetching transaction history: {str(e)}")
             return []
     
     @staticmethod
@@ -645,12 +794,25 @@ class InventoryDB:
                 if adj.get('item_master'):
                     adj['item_name'] = adj['item_master']['item_name']
                     adj['unit'] = adj['item_master']['unit']
+                
+                # Add aliases
+                adj['quantity'] = abs(adj.get('quantity_adjusted', 0))
+                adj['performed_by'] = adj.get('username', 'Unknown')
             
             return adjustments
         
         except Exception as e:
             st.error(f"Error fetching adjustments: {str(e)}")
             return []
+    
+    @staticmethod
+    def get_recent_adjustments(limit: int = 20) -> List[Dict]:
+        """
+        Get recent adjustments (wrapper for UI)
+        NEW in v2.1.0
+        """
+        adjustments = InventoryDB.get_adjustments(days=30)
+        return adjustments[:limit] if adjustments else []
     
     # =====================================================
     # BATCH TRACEABILITY
@@ -702,7 +864,7 @@ class InventoryDB:
     
     @staticmethod
     def create_po(po_data: Dict, po_items: List[Dict], user_id: str) -> Optional[int]:
-        """Create purchase order"""
+        """Create purchase order (v2.0.0 signature)"""
         try:
             db = Database.get_client()
             
@@ -729,8 +891,73 @@ class InventoryDB:
             return None
     
     @staticmethod
+    def create_purchase_order(
+        po_number: str,
+        item_master_id: int,
+        supplier_name: str,
+        quantity: float,
+        unit_cost: float,
+        po_date: date,
+        expected_delivery: date = None,
+        notes: str = None,
+        username: str = None
+    ) -> bool:
+        """
+        Create purchase order (simplified UI wrapper)
+        NEW in v2.1.0
+        """
+        try:
+            db = Database.get_client()
+            
+            # Get supplier_id from name
+            supplier_id = None
+            if supplier_name:
+                supplier_response = db.table('suppliers') \
+                    .select('id') \
+                    .eq('supplier_name', supplier_name) \
+                    .execute()
+                
+                if supplier_response.data:
+                    supplier_id = supplier_response.data[0]['id']
+            
+            # Create PO
+            po_data = {
+                'po_number': po_number,
+                'supplier_id': supplier_id,
+                'po_date': po_date.isoformat() if isinstance(po_date, date) else po_date,
+                'expected_delivery': expected_delivery.isoformat() if expected_delivery and isinstance(expected_delivery, date) else expected_delivery,
+                'status': 'pending',
+                'notes': notes,
+                'created_by': username
+            }
+            
+            po_response = db.table('purchase_orders').insert(po_data).execute()
+            
+            if not po_response.data:
+                return False
+            
+            po_id = po_response.data[0]['id']
+            
+            # Create PO item
+            po_item = {
+                'po_id': po_id,
+                'item_master_id': item_master_id,
+                'quantity_ordered': quantity,
+                'unit_cost': unit_cost,
+                'total_cost': quantity * unit_cost
+            }
+            
+            db.table('purchase_order_items').insert(po_item).execute()
+            
+            return True
+        
+        except Exception as e:
+            st.error(f"Error creating purchase order: {str(e)}")
+            return False
+    
+    @staticmethod
     def get_pos(status: str = None, days: int = 90) -> List[Dict]:
-        """Get purchase orders"""
+        """Get purchase orders (v2.0.0 signature)"""
         try:
             db = Database.get_client()
             
@@ -757,6 +984,22 @@ class InventoryDB:
         except Exception as e:
             st.error(f"Error fetching POs: {str(e)}")
             return []
+    
+    @staticmethod
+    def get_all_purchase_orders(days_back: int = 30) -> List[Dict]:
+        """
+        Get all purchase orders (UI wrapper)
+        NEW in v2.1.0
+        """
+        return InventoryDB.get_pos(status=None, days=days_back)
+    
+    @staticmethod
+    def get_purchase_orders_by_status(status: str, days_back: int = 30) -> List[Dict]:
+        """
+        Get filtered purchase orders (UI wrapper)
+        NEW in v2.1.0
+        """
+        return InventoryDB.get_pos(status=status, days=days_back)
     
     @staticmethod
     def get_po_items(po_id: int) -> List[Dict]:
@@ -803,6 +1046,62 @@ class InventoryDB:
     # =====================================================
     # ANALYTICS & REPORTS
     # =====================================================
+    
+    @staticmethod
+    def get_inventory_summary() -> Dict:
+        """
+        Get inventory summary statistics (for dashboard)
+        NEW in v2.1.0
+        """
+        try:
+            db = Database.get_client()
+            
+            # Get active items count
+            items_response = db.table('item_master') \
+                .select('id', count='exact') \
+                .eq('is_active', True) \
+                .execute()
+            
+            total_active_items = items_response.count if items_response else 0
+            
+            # Get total batches
+            batches_response = db.table('inventory_batches') \
+                .select('id', count='exact') \
+                .gt('remaining_qty', 0) \
+                .execute()
+            
+            total_batches = batches_response.count if batches_response else 0
+            
+            # Get inventory value (admin only)
+            try:
+                valuation_response = db.rpc('get_inventory_valuation').execute()
+                if valuation_response.data:
+                    total_value = sum([v.get('total_value', 0) for v in valuation_response.data])
+                    avg_value = total_value / total_active_items if total_active_items > 0 else 0
+                else:
+                    total_value = 0
+                    avg_value = 0
+            except:
+                # If RPC doesn't exist, calculate manually
+                batches = InventoryDB.get_all_batches(active_only=True)
+                total_value = sum([b.get('batch_value', 0) for b in batches])
+                avg_value = total_value / total_active_items if total_active_items > 0 else 0
+            
+            return {
+                'total_active_items': total_active_items,
+                'total_batches': total_batches,
+                'total_inventory_value': total_value,
+                'avg_item_value': avg_value
+            }
+        
+        except Exception as e:
+            st.error(f"Error fetching inventory summary: {str(e)}")
+            return {
+                'total_active_items': 0,
+                'total_batches': 0,
+                'total_inventory_value': 0,
+                'avg_item_value': 0
+            }
     
     @staticmethod
     def get_inventory_valuation() -> List[Dict]:
@@ -856,6 +1155,57 @@ class InventoryDB:
         except Exception as e:
             st.error(f"Error fetching consumption: {str(e)}")
             return {}
+    
+    @staticmethod
+    def get_module_consumption(
+        module_name: str,
+        start_date: date,
+        end_date: date
+    ) -> List[Dict]:
+        """
+        Get consumption for specific module (UI wrapper)
+        NEW in v2.1.0
+        """
+        try:
+            db = Database.get_client()
+            
+            response = db.table('inventory_transactions') \
+                .select('item_master(item_name, unit), quantity_change, total_cost, module_reference') \
+                .eq('transaction_type', 'remove') \
+                .eq('module_reference', module_name) \
+                .gte('transaction_date', start_date.isoformat()) \
+                .lte('transaction_date', end_date.isoformat()) \
+                .execute()
+            
+            if not response.data:
+                return []
+            
+            # Flatten and aggregate
+            consumption = {}
+            for tx in response.data:
+                item_name = tx['item_master']['item_name'] if tx.get('item_master') else 'Unknown'
+                unit = tx['item_master']['unit'] if tx.get('item_master') else ''
+                
+                qty = abs(tx.get('quantity_change', 0))
+                cost = tx.get('total_cost', 0) or 0
+                
+                if item_name not in consumption:
+                    consumption[item_name] = {
+                        'module_name': module_name,
+                        'item_name': item_name,
+                        'unit': unit,
+                        'total_quantity': 0,
+                        'total_cost': 0
+                    }
+                
+                consumption[item_name]['total_quantity'] += qty
+                consumption[item_name]['total_cost'] += cost
+            
+            return list(consumption.values())
+        
+        except Exception as e:
+            st.error(f"Error fetching module consumption: {str(e)}")
+            return []
     
     @staticmethod
     def generate_verification_report() -> List[Dict]:
