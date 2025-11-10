@@ -2,8 +2,13 @@
 Session Management with User Permissions
 Farm Management System
 
-VERSION: 1.1.0
-DATE: November 8, 2025
+VERSION: 1.2.0
+DATE: November 10, 2025
+CHANGES FROM V1.1.0:
+- Added reset_password() method for password recovery
+- Supports password reset via recovery token from email
+- Logs password reset activity
+
 CHANGES FROM V1.0.0:
 - Removed is_manager() method (lines 177-184 from old code)
 - Cleaned up Manager role references
@@ -107,7 +112,61 @@ class SessionManager:
                 return False, "No account found with this email"
             else:
                 return False, f"Login failed: {error_message}"
-    
+
+    @staticmethod
+    def reset_password(recovery_token: str, new_password: str) -> Tuple[bool, str]:
+        """
+        Reset user password using recovery token
+        Args:
+            recovery_token: Recovery token from password reset email
+            new_password: New password to set
+        Returns:
+            Tuple of (success: bool, message: str)
+        """
+        try:
+            # Get Supabase client
+            supabase = Database.get_client()
+
+            # Use the recovery token to create an authenticated session
+            # Then update the user's password
+            auth_response = supabase.auth.set_session(recovery_token, recovery_token)
+
+            if not auth_response or not auth_response.user:
+                return False, "Invalid or expired recovery token"
+
+            # Update password using the authenticated session
+            update_response = supabase.auth.update_user({
+                "password": new_password
+            })
+
+            if update_response.user:
+                # Log the password reset
+                ActivityLogger.log(
+                    user_id=auth_response.user.id,
+                    action_type='password_reset',
+                    module_key='auth',
+                    description="User reset password via recovery link",
+                    user_email=auth_response.user.email
+                )
+
+                # Sign out the temporary session
+                supabase.auth.sign_out()
+
+                return True, "Password reset successful"
+            else:
+                return False, "Failed to update password"
+
+        except Exception as e:
+            error_message = str(e)
+
+            # Handle specific errors
+            if "expired" in error_message.lower():
+                return False, "Recovery link has expired. Please request a new password reset."
+            elif "invalid" in error_message.lower():
+                return False, "Invalid recovery link. Please request a new password reset."
+            else:
+                return False, f"Password reset failed: {error_message}"
+
     @staticmethod
     def _load_accessible_modules(user_id: str, profile: Dict) -> List[Dict]:
         """
