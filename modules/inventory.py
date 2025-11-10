@@ -3,6 +3,13 @@ Inventory Management Module
 Complete inventory system with batch tracking, FIFO, expiry management, and cost tracking
 
 VERSION HISTORY:
+2.1.3 - Normalize master item columns - 10/11/25
+      FIXES:
+      - Safely rename master list columns when optional fields are missing
+      - Prevent pandas length mismatch errors in Item Master tab
+      CHANGES:
+      - show_all_master_items
+
 2.1.2 - Resolved alerts column mismatch - 10/11/25
       FIXES:
       - Handle optional columns when renaming low stock alerts table
@@ -1200,11 +1207,31 @@ def show_all_master_items():
     df = pd.DataFrame(items)
     display_cols = ['item_name', 'sku', 'category', 'brand', 'unit', 'current_qty', 'reorder_level', 'is_active']
     display_cols = [col for col in display_cols if col in df.columns]
+    
+    if not display_cols:
+        st.info("No displayable columns returned for master items.")
+        return
+    
     display_df = df[display_cols].copy()
     
-    display_df['is_active'] = display_df['is_active'].map({True: '✅ Active', False: '❌ Inactive'})
+    if 'is_active' in display_df.columns:
+        display_df['is_active'] = display_df['is_active'].map({True: '✅ Active', False: '❌ Inactive'})
     
-    display_df.columns = ['Item Name', 'SKU', 'Category', 'Brand', 'Unit', 'Current Stock', 'Reorder Level', 'Status']
+    column_mapping = {
+        'item_name': 'Item Name',
+        'sku': 'SKU',
+        'category': 'Category',
+        'brand': 'Brand',
+        'unit': 'Unit',
+        'current_qty': 'Current Stock',
+        'reorder_level': 'Reorder Level',
+        'is_active': 'Status'
+    }
+    
+    display_df.rename(
+        columns={col: column_mapping.get(col, col) for col in display_df.columns},
+        inplace=True
+    )
     
     st.dataframe(display_df, use_container_width=True, hide_index=True, height=500)
 
