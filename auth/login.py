@@ -2,7 +2,7 @@
 Login Page and Authentication UI
 Farm Management System
 
-VERSION: 1.1.3 - Added manual workaround and dual JavaScript injection
+VERSION: 1.1.4 - Fixed button-in-form error with auto-redirect
 """
 import streamlit as st
 from auth.session import SessionManager
@@ -145,18 +145,23 @@ def handle_password_reset(recovery_token: str, new_password: str):
         recovery_token: Recovery token from Supabase
         new_password: New password to set
     """
+    import time
+
     with st.spinner("Resetting password..."):
         success, message = SessionManager.reset_password(recovery_token, new_password)
 
         if success:
             st.success("✅ Password reset successful! You can now login with your new password.")
-            st.info("Click below to go to login page")
-            if st.button("Go to Login", use_container_width=True, type="primary"):
-                # Clear recovery token from session state and query params
-                if 'recovery_token' in st.session_state:
-                    del st.session_state.recovery_token
-                st.query_params.clear()
-                st.rerun()
+            st.info("Redirecting to login page...")
+
+            # Clear recovery token from session state and query params
+            if 'recovery_token' in st.session_state:
+                del st.session_state.recovery_token
+            st.query_params.clear()
+
+            # Wait a moment for user to see the success message
+            time.sleep(2)
+            st.rerun()
         else:
             st.error(f"❌ {message}")
 
