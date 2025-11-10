@@ -3,6 +3,13 @@ Inventory Management Module
 Complete inventory system with batch tracking, FIFO, expiry management, and cost tracking
 
 VERSION HISTORY:
+2.1.2 - Resolved alerts column mismatch - 10/11/25
+      FIXES:
+      - Handle optional columns when renaming low stock alerts table
+      - Prevent pandas length mismatch errors in Alerts tab
+      CHANGES:
+      - show_alerts_tab
+
 2.1.1 - Fixed duplicate button IDs - 10/11/25
       FIXES:
       - Added unique key parameters to all refresh buttons
@@ -946,13 +953,36 @@ def show_alerts_tab(username: str):
         st.error(f"⚠️ {len(low_stock)} items below reorder level")
         
         df = pd.DataFrame(low_stock)
-        display_cols = ['item_name', 'category', 'current_qty', 'reorder_level', 'unit', 'avg_daily_usage', 'days_until_stockout']
+        display_cols = [
+            'item_name',
+            'category',
+            'current_qty',
+            'reorder_level',
+            'unit',
+            'avg_daily_usage',
+            'days_until_stockout'
+        ]
         display_cols = [col for col in display_cols if col in df.columns]
-        display_df = df[display_cols].copy()
         
-        display_df.columns = ['Item', 'Category', 'Current Stock', 'Reorder Level', 'Unit', 'Avg Daily Usage', 'Days to Stockout']
-        
-        st.dataframe(display_df, use_container_width=True, hide_index=True)
+        if not display_cols:
+            st.info("No displayable columns returned for low stock items.")
+        else:
+            display_df = df[display_cols].copy()
+            column_mapping = {
+                'item_name': 'Item',
+                'category': 'Category',
+                'current_qty': 'Current Stock',
+                'reorder_level': 'Reorder Level',
+                'unit': 'Unit',
+                'avg_daily_usage': 'Avg Daily Usage',
+                'days_until_stockout': 'Days to Stockout'
+            }
+            display_df.rename(
+                columns={col: column_mapping.get(col, col) for col in display_df.columns},
+                inplace=True
+            )
+            
+            st.dataframe(display_df, use_container_width=True, hide_index=True)
     else:
         st.success("✅ All items above reorder level")
     
