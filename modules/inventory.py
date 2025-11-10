@@ -3,6 +3,16 @@ Inventory Management Module
 Complete inventory system with batch tracking, FIFO, expiry management, and cost tracking
 
 VERSION HISTORY:
+2.1.4 - Align master item supplier field - 10/11/25
+      FIXES:
+      - Map supplier selections to supplier_id to match item_master schema
+      - Prevent erroneous inserts when default supplier column is absent
+      - Preserve inactive supplier assignments during edit
+      CHANGES:
+      - show_add_master_item
+      - show_edit_master_item
+      - VERSION HISTORY
+
 2.1.3 - Normalize master item columns - 10/11/25
       FIXES:
       - Safely rename master list columns when optional fields are missing
@@ -1301,12 +1311,19 @@ def show_add_master_item(username: str):
             reorder_level = st.number_input("Reorder Level *", min_value=0.0, step=0.01, format="%.2f")
             
             suppliers = InventoryDB.get_all_suppliers(active_only=True)
-            supplier_options = ["None"] + [s['supplier_name'] for s in suppliers]
-            default_supplier = st.selectbox(
+            supplier_options = [None] + [s['id'] for s in suppliers if s.get('id') is not None]
+            supplier_label_map = {
+                None: "None",
+                **{s['id']: s.get('supplier_name', f"Supplier #{s['id']}") for s in suppliers if s.get('id') is not None}
+            }
+            
+            selected_supplier_id = st.selectbox(
                 "Default Supplier",
                 options=supplier_options,
+                format_func=lambda value: supplier_label_map.get(value, "Unknown"),
                 key="add_master_default_supplier_select"
             )
+            selected_supplier_name = supplier_label_map.get(selected_supplier_id, "None")
             
             specifications = st.text_area("Specifications", height=80)
             notes = st.text_area("Notes", height=80)
@@ -1341,27 +1358,31 @@ def show_add_master_item(username: str):
                         brand=brand.strip() if brand else None,
                         unit=unit,
                         reorder_level=reorder_level,
-                        default_supplier=default_supplier if default_supplier != "None" else None,
+                        supplier_id=selected_supplier_id,
                         specifications=specifications.strip() if specifications else None,
                         notes=notes.strip() if notes else None,
                         username=username
                     )
+            
+            if success:
+                st.success(f"✅ Item '{item_name}' added successfully!")
                 
-                if success:
-                    st.success(f"✅ Item '{item_name}' added successfully!")
-                    
-                    ActivityLogger.log(
-                        user_id=st.session_state.user['id'],
-                        action_type='add_master_item',
-                        module_key='inventory_management',
-                        description=f"Added master item: {item_name}",
-                        metadata={'item_name': item_name, 'sku': sku}
-                    )
-                    
-                    time.sleep(1)
-                    st.rerun()
-                else:
-                    st.error("❌ Failed to add item. SKU may already exist.")
+                ActivityLogger.log(
+                    user_id=st.session_state.user['id'],
+                    action_type='add_master_item',
+                    module_key='inventory_management',
+                    description=f"Added master item: {item_name}",
+                    metadata={
+                        'item_name': item_name,
+                        'sku': sku,
+                        'supplier': selected_supplier_name if selected_supplier_id else None
+                    }
+                )
+                
+                time.sleep(1)
+                st.rerun()
+            else:
+                st.error("❌ Failed to add item. SKU may already exist.")
 
 
 def show_edit_master_item(username: str):
@@ -1409,15 +1430,27 @@ def show_edit_master_item(username: str):
             reorder_level = st.number_input("Reorder Level *", value=float(selected_item.get('reorder_level', 0)))
             
             suppliers = InventoryDB.get_all_suppliers(active_only=True)
-            supplier_options = ["None"] + [s['supplier_name'] for s in suppliers]
-            current_supplier = selected_item.get('default_supplier', 'None') or 'None'
-            supplier_index = supplier_options.index(current_supplier) if current_supplier in supplier_options else 0
-            default_supplier = st.selectbox(
+            supplier_options = [None] + [s['id'] for s in suppliers if s.get('id') is not None]
+            supplier_label_map = {
+                None: "None",
+                **{s['id']: s.get('supplier_name', f"Supplier #{s['id']}") for s in suppliers if s.get('id') is not None}
+            }
+            
+            current_supplier_id = selected_item.get('supplier_id')
+            if current_supplier_id is not None and current_supplier_id not in supplier_label_map:
+                supplier_options.append(current_supplier_id)
+                supplier_label_map[current_supplier_id] = selected_item.get('supplier_name', f"Supplier #{current_supplier_id}")
+            
+            supplier_index = supplier_options.index(current_supplier_id) if current_supplier_id in supplier_options else 0
+            
+            selected_supplier_id = st.selectbox(
                 "Default Supplier",
                 options=supplier_options,
                 index=supplier_index,
+                format_func=lambda value: supplier_label_map.get(value, "Unknown"),
                 key="edit_master_default_supplier_select"
             )
+            selected_supplier_name = supplier_label_map.get(selected_supplier_id, "None")
             
             is_active = st.checkbox("Active", value=selected_item.get('is_active', True))
             
@@ -1440,7 +1473,7 @@ def show_edit_master_item(username: str):
                     brand=brand.strip() if brand else None,
                     unit=unit,
                     reorder_level=reorder_level,
-                    default_supplier=default_supplier if default_supplier != "None" else None,
+                    supplier_id=selected_supplier_id,
                     specifications=specifications.strip() if specifications else None,
                     notes=notes.strip() if notes else None,
                     is_active=is_active,
@@ -1455,7 +1488,10 @@ def show_edit_master_item(username: str):
                     action_type='update_master_item',
                     module_key='inventory_management',
                     description=f"Updated master item: {item_name}",
-                    metadata={'item_name': item_name}
+                    metadata={
+                        'item_name': item_name,
+                        'supplier': selected_supplier_name if selected_supplier_id else None
+                    }
                 )
                 
                 time.sleep(1)
