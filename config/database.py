@@ -3,6 +3,15 @@ Database configuration and connection utilities for Supabase
 Farm Management System
 
 VERSION HISTORY:
+1.5.0 - Added user role tracking to activity logs - 10/11/25
+      ADDITIONS:
+      - user_role parameter to ActivityLogger.log()
+      - Automatic role detection from session state (admin/user)
+      - Role stored in activity_logs table
+      IMPROVEMENTS:
+      - Activity logs now track user role for better audit trail
+      - Automatic role resolution from user_profile in session
+
 1.4.0 - Enhanced ActivityLogger with email resolution - 10/11/25
       ADDITIONS:
       - Optional user_email parameter to ActivityLogger.log()
@@ -714,7 +723,7 @@ class ActivityLogger:
     @staticmethod
     def log(user_id: str, action_type: str, module_key: str = None,
             description: str = None, metadata: Dict = None, success: bool = True,
-            user_email: str = None) -> bool:
+            user_email: str = None, user_role: str = None) -> bool:
         """
         Log user activity
 
@@ -726,6 +735,7 @@ class ActivityLogger:
             metadata: Additional data as dict
             success: Whether action succeeded
             user_email: Optional user email (if not provided, will try to fetch from session or auth)
+            user_role: Optional user role (admin/user) - fetched from session if not provided
         """
         try:
             # Validate inputs
@@ -739,16 +749,22 @@ class ActivityLogger:
 
             db = Database.get_client()
 
-            # Get user email - use provided or try to fetch
-            if not user_email:
-                user_email = 'Unknown'
+            # Get user email and role - use provided or try to fetch
+            if not user_email or not user_role:
+                user_email = user_email or 'Unknown'
+                user_role = user_role or 'user'
 
                 # Try to get from Streamlit session state first
                 try:
                     import streamlit as st
                     if 'user' in st.session_state and st.session_state.user:
-                        if 'email' in st.session_state.user:
-                            user_email = st.session_state.user['email']
+                        if not user_email or user_email == 'Unknown':
+                            user_email = st.session_state.user.get('email', 'Unknown')
+
+                        # Get role from session
+                        if 'user_profile' in st.session_state and st.session_state.user_profile:
+                            role_name = st.session_state.user_profile.get('role_name', '').lower()
+                            user_role = 'admin' if role_name == 'admin' else 'user'
                 except:
                     pass
 
@@ -764,6 +780,7 @@ class ActivityLogger:
             log_data = {
                 'user_id': str(user_id),  # Ensure it's a string
                 'user_email': user_email,
+                'user_role': user_role,
                 'action_type': action_type,
                 'description': description,
                 'module_key': module_key,
