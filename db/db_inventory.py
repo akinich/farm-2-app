@@ -1,8 +1,22 @@
 """
-Inventory Database Operations V2.1.4
-Enhanced PO display with proper joins
+Inventory Database Operations V2.1.5
+Fixed PO schema relationships and generated columns
 
 VERSION HISTORY:
+2.1.5 - Fixed PO relationship errors and generated column issues - 10/11/25
+      CHANGES:
+      - get_pos() - Removed direct item_master join (no FK relationship exists)
+      - get_pos() - Now fetches items via purchase_order_items table
+      - create_purchase_order() - Removed total_cost from insert (generated column)
+      FEATURES:
+      - PO list now correctly fetches items through proper relationship chain
+      - Supports multiple items per PO with (+N more) indicator
+      - Calculates totals dynamically from purchase_order_items
+      FIXES:
+      - Fixed "Could not find a relationship between purchase_orders and item_master" error
+      - Fixed "cannot insert a non-DEFAULT value into column total_cost" error
+      - PO creation now works correctly without trying to insert generated columns
+
 2.1.4 - Enhanced purchase order display - 10/11/25
       CHANGES:
       - get_pos() - Added joins for item_master and user_profiles
@@ -1174,15 +1188,14 @@ class InventoryDB:
             
             po_id = po_response.data[0]['id']
             
-            # Create PO item
+            # Create PO item (total_cost is a generated column, don't insert it)
             po_item = {
                 'po_id': po_id,
                 'item_master_id': item_master_id,
                 'quantity_ordered': quantity,
-                'unit_cost': unit_cost,
-                'total_cost': quantity * unit_cost
+                'unit_cost': unit_cost
             }
-            
+
             db.table('purchase_order_items').insert(po_item).execute()
             
             return True
@@ -1200,7 +1213,7 @@ class InventoryDB:
             since_date = datetime.now() - timedelta(days=days)
 
             query = db.table('purchase_orders') \
-                .select('*, suppliers(supplier_name), item_master(item_name, unit), user_profiles!purchase_orders_created_by_fkey(full_name)') \
+                .select('*, suppliers(supplier_name), user_profiles!purchase_orders_created_by_fkey(full_name)') \
                 .gte('po_date', since_date.date().isoformat()) \
                 .order('po_date', desc=True)
 
@@ -1214,14 +1227,45 @@ class InventoryDB:
             for po in pos:
                 if po.get('suppliers'):
                     po['supplier_name'] = po['suppliers']['supplier_name']
-                if po.get('item_master'):
-                    po['item_name'] = po['item_master']['item_name']
-                    po['unit'] = po['item_master'].get('unit', '')
                 if po.get('user_profiles'):
                     po['created_by'] = po['user_profiles']['full_name']
                 else:
                     # Fallback if profile not found
                     po['created_by'] = po.get('created_by', 'Unknown')
+
+                # Fetch items for this PO to get item name and totals
+                try:
+                    items_response = db.table('purchase_order_items') \
+                        .select('*, item_master(item_name, unit)') \
+                        .eq('po_id', po['id']) \
+                        .execute()
+
+                    if items_response.data:
+                        # Get first item's name and unit for display
+                        first_item = items_response.data[0]
+                        if first_item.get('item_master'):
+                            po['item_name'] = first_item['item_master']['item_name']
+                            po['unit'] = first_item['item_master'].get('unit', '')
+
+                        # Calculate totals from items
+                        po['quantity'] = sum(item.get('quantity_ordered', 0) for item in items_response.data)
+                        po['unit_cost'] = items_response.data[0].get('unit_cost', 0) if items_response.data else 0
+                        po['total_cost'] = sum(item.get('quantity_ordered', 0) * item.get('unit_cost', 0) for item in items_response.data)
+
+                        # If multiple items, append count
+                        if len(items_response.data) > 1:
+                            po['item_name'] = f"{po['item_name']} (+{len(items_response.data)-1} more)"
+                    else:
+                        po['item_name'] = 'N/A'
+                        po['quantity'] = 0
+                        po['unit_cost'] = 0
+                        po['total_cost'] = 0
+                except Exception as item_error:
+                    print(f"Warning: Could not fetch items for PO {po.get('id')}: {str(item_error)}")
+                    po['item_name'] = 'N/A'
+                    po['quantity'] = 0
+                    po['unit_cost'] = 0
+                    po['total_cost'] = 0
 
             return pos
 
