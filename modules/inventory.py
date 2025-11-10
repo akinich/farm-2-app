@@ -1,49 +1,165 @@
 """
-Inventory Management Module V1.1.0
-Professional inventory system with expiry tracking, batches, POs, and analytics
+Inventory Management Module
+Comprehensive inventory system with expiry tracking, batch management, POs, and analytics
 
 VERSION HISTORY:
-1.1.0 - Professional features added - 09/11/25
+2.0.0 - Complete professional inventory system - 10/11/25
       FEATURES:
-      - Expiry date tracking with 30-day alerts (no blocking)
-      - Batch/Lot number tracking
-      - Stock adjustments (wastage, damage, expired, etc.)
-      - Purchase Order management
+      - Dashboard with metrics and charts
+      - Current inventory with editable table
+      - Add stock with batch tracking
+      - Remove stock with module tracking
+      - Stock adjustments (wastage, damage, etc.)
+      - Purchase order management
+      - Low stock and expiry alerts (30-day warning)
+      - Transaction history with full audit trail
       - Supplier management
-      - Usage analytics by module
-      - Cost tracking (unit_cost prominently displayed)
-      - Delete entries option (admin only)
-      - Integration hooks for other modules
-      - Excel export for all reports
-      TABS:
-      1. Dashboard - Quick metrics and charts
-      2. Current Inventory - Editable table with filters
-      3. Add Stock - Purchase with batch tracking
-      4. Remove Stock - Usage tracking by module
-      5. Stock Adjustments - Wastage, damage, etc.
-      6. Purchase Orders - PO creation and tracking
-      7. Low Stock & Expiry Alerts - Combined alerts
-      8. Transaction History - Full audit trail
-      9. Suppliers - Supplier management
-      10. Analytics & Reports - Consumption trends, exports
-1.0.0 - Initial inventory module - 08/11/25
+      - Analytics with consumption reports and Excel exports
+      NOTES:
+      - Expiry alerts are warnings only (no blocking)
+      - All costs tracked prominently
+      - Delete functionality for all entries
+      - Integration hooks for farm modules
 """
+
 import streamlit as st
 import pandas as pd
 from datetime import datetime, date, timedelta
-from typing import List, Dict, Optional
+from typing import Dict, List, Optional, Tuple
+import plotly.express as px
+import plotly.graph_objects as go
 from io import BytesIO
 
 from auth.session import SessionManager
 from config.database import ActivityLogger
-from db.db_inventory import InventoryDB
 
+# Import inventory database helper
+try:
+    from db_inventory import InventoryDB
+except ImportError:
+    st.error("⚠️ Cannot import InventoryDB. Make sure db_inventory.py exists")
+    st.stop()
+
+
+# =====================================================
+# HELPER FUNCTIONS
+# =====================================================
+
+def format_currency(amount: float) -> str:
+    """Format number as currency"""
+    return f"₹{amount:,.2f}"
+
+
+def get_stock_status_color(current: float, reorder: float) -> str:
+    """Get color based on stock level"""
+    if current == 0:
+        return "🔴"
+    elif current <= reorder:
+        return "🟡"
+    else:
+        return "🟢"
+
+
+def get_expiry_status(expiry_date: date) -> Tuple[str, str]:
+    """Get expiry status and color"""
+    if not expiry_date:
+        return "No expiry", "⚪"
+    
+    days_until = (expiry_date - date.today()).days
+    
+    if days_until < 0:
+        return f"Expired {abs(days_until)}d ago", "🔴"
+    elif days_until <= 7:
+        return f"Expires in {days_until}d", "🔴"
+    elif days_until <= 30:
+        return f"Expires in {days_until}d", "🟡"
+    else:
+        return f"Expires in {days_until}d", "🟢"
+
+
+def create_stock_level_chart(summary_df: pd.DataFrame):
+    """Create stock level visualization"""
+    if summary_df.empty:
+        return None
+    
+    # Prepare data
+    chart_data = summary_df[['item_name', 'current_stock', 'reorder_level']].copy()
+    chart_data = chart_data.head(10)  # Top 10 items
+    
+    fig = go.Figure()
+    
+    # Current stock bars
+    fig.add_trace(go.Bar(
+        name='Current Stock',
+        x=chart_data['item_name'],
+        y=chart_data['current_stock'],
+        marker_color='lightblue'
+    ))
+    
+    # Reorder level line
+    fig.add_trace(go.Scatter(
+        name='Reorder Level',
+        x=chart_data['item_name'],
+        y=chart_data['reorder_level'],
+        mode='lines+markers',
+        marker_color='red',
+        line=dict(dash='dash')
+    ))
+    
+    fig.update_layout(
+        title='Stock Levels vs Reorder Points (Top 10)',
+        xaxis_title='Item',
+        yaxis_title='Quantity',
+        height=400,
+        showlegend=True,
+        hovermode='x unified'
+    )
+    
+    return fig
+
+
+def create_category_pie_chart(summary_df: pd.DataFrame):
+    """Create category distribution pie chart"""
+    if summary_df.empty:
+        return None
+    
+    category_value = summary_df.groupby('category')['total_value'].sum().reset_index()
+    
+    fig = px.pie(
+        category_value,
+        values='total_value',
+        names='category',
+        title='Inventory Value by Category',
+        hole=0.3
+    )
+    
+    fig.update_traces(textposition='inside', textinfo='percent+label')
+    fig.update_layout(height=400)
+    
+    return fig
+
+
+def export_to_excel(dataframes: Dict[str, pd.DataFrame], filename: str) -> BytesIO:
+    """Export multiple dataframes to Excel with multiple sheets"""
+    output = BytesIO()
+    
+    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+        for sheet_name, df in dataframes.items():
+            df.to_excel(writer, sheet_name=sheet_name, index=False)
+    
+    output.seek(0)
+    return output
+
+
+# =====================================================
+# MAIN MODULE FUNCTION
+# =====================================================
 
 def show():
     """Main entry point for Inventory Management module"""
     
-    # Check module access
-    SessionManager.require_module_access('inventory')
+    # Check access
+    SessionManager.require_module_access('inventory_management')
     
     # Get user info
     user = SessionManager.get_user()
@@ -53,89 +169,111 @@ def show():
     
     # Module header
     st.title("📦 Inventory Management")
-    st.caption(f"👤 {username} | Shared resource across all farm modules")
+    st.caption(f"👤 {username} | Role: {profile.get('role_name', 'User')}")
     st.markdown("---")
     
+    # Initialize session state
+    if 'inv_refresh_trigger' not in st.session_state:
+        st.session_state.inv_refresh_trigger = 0
+    
     # Create tabs
-    tabs = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10 = st.tabs([
         "📊 Dashboard",
-        "📦 Current Inventory",
+        "📋 Current Inventory",
         "➕ Add Stock",
         "➖ Remove Stock",
-        "🔄 Adjustments",
-        "🛒 Purchase Orders",
-        "🔔 Alerts",
+        "⚖️ Adjustments",
+        "📝 Purchase Orders",
+        "⚠️ Alerts",
         "📜 History",
-        "👥 Suppliers",
+        "🏢 Suppliers",
         "📈 Analytics"
     ])
     
-    with tabs[0]:
-        show_dashboard()
+    with tab1:
+        show_dashboard_tab(user, is_admin)
     
-    with tabs[1]:
-        show_current_inventory(username, is_admin)
+    with tab2:
+        show_current_inventory_tab(user, is_admin)
     
-    with tabs[2]:
-        show_add_stock(username, is_admin)
+    with tab3:
+        show_add_stock_tab(user, is_admin)
     
-    with tabs[3]:
-        show_remove_stock(username)
+    with tab4:
+        show_remove_stock_tab(user, is_admin)
     
-    with tabs[4]:
-        show_adjustments(username, is_admin)
+    with tab5:
+        show_adjustments_tab(user, is_admin)
     
-    with tabs[5]:
-        show_purchase_orders(username, is_admin)
+    with tab6:
+        show_purchase_orders_tab(user, is_admin)
     
-    with tabs[6]:
-        show_alerts()
+    with tab7:
+        show_alerts_tab(user, is_admin)
     
-    with tabs[7]:
-        show_transaction_history(is_admin)
+    with tab8:
+        show_history_tab(user, is_admin)
     
-    with tabs[8]:
-        show_suppliers(username, is_admin)
+    with tab9:
+        show_suppliers_tab(user, is_admin)
     
-    with tabs[9]:
-        show_analytics()
+    with tab10:
+        show_analytics_tab(user, is_admin)
 
 
 # =====================================================
 # TAB 1: DASHBOARD
 # =====================================================
 
-def show_dashboard():
-    """Dashboard with quick metrics and charts"""
+def show_dashboard_tab(user: Dict, is_admin: bool):
+    """Dashboard with key metrics and visualizations"""
     
     st.markdown("### 📊 Inventory Dashboard")
     
-    # Load data
-    items = InventoryDB.get_all_items(active_only=True)
-    low_stock = InventoryDB.get_low_stock_items()
-    expiring = InventoryDB.get_expiring_items(days_ahead=30)
-    valuation = InventoryDB.get_inventory_valuation()
+    col1, col2 = st.columns([3, 1])
     
-    # Top metrics
-    col1, col2, col3, col4 = st.columns(4)
+    with col2:
+        if st.button("🔄 Refresh", key="dash_refresh", use_container_width=True):
+            st.session_state.inv_refresh_trigger += 1
+            st.rerun()
+    
+    # Fetch summary data
+    with st.spinner("Loading dashboard..."):
+        summary = InventoryDB.get_inventory_summary()
+        low_stock = InventoryDB.get_low_stock_items()
+        expiring = InventoryDB.get_expiring_items(days_ahead=30)
+    
+    if not summary:
+        st.info("No inventory items found. Add items to get started!")
+        return
+    
+    # Convert to DataFrame
+    summary_df = pd.DataFrame(summary)
+    
+    # Key Metrics
+    st.markdown("#### 📈 Key Metrics")
+    
+    col1, col2, col3, col4, col5 = st.columns(5)
     
     with col1:
-        total_items = len(items)
+        total_items = len(summary_df)
         st.metric("Total Items", total_items)
     
     with col2:
-        low_stock_count = len(low_stock)
-        st.metric("Low Stock Items", low_stock_count, 
-                 delta="⚠️" if low_stock_count > 0 else None)
+        total_value = summary_df['total_value'].sum()
+        st.metric("Total Value", format_currency(total_value))
     
     with col3:
-        expiring_count = len(expiring)
-        st.metric("Expiring Soon", expiring_count,
-                 delta="⚠️" if expiring_count > 0 else None)
+        low_stock_count = len(low_stock) if low_stock else 0
+        st.metric("Low Stock Items", low_stock_count, delta=None if low_stock_count == 0 else "⚠️")
     
     with col4:
-        total_value = sum(v['total_value'] for v in valuation) if valuation else 0
-        st.metric("Total Inventory Value", f"₹{total_value:,.2f}")
+        expiring_count = len(expiring) if expiring else 0
+        st.metric("Expiring Soon (30d)", expiring_count, delta=None if expiring_count == 0 else "⚠️")
+    
+    with col5:
+        active_batches = summary_df['active_batches'].sum()
+        st.metric("Active Batches", int(active_batches))
     
     st.markdown("---")
     
@@ -143,735 +281,797 @@ def show_dashboard():
     col1, col2 = st.columns(2)
     
     with col1:
-        st.markdown("#### 📊 Stock Status Distribution")
-        if items:
-            status_counts = {
-                'Good Stock': len([i for i in items if i.get('stock_status') == 'good']),
-                'Low Stock': len([i for i in items if i.get('stock_status') == 'low']),
-                'Critical': len([i for i in items if i.get('stock_status') == 'critical'])
-            }
-            st.bar_chart(status_counts)
-        else:
-            st.info("No data available")
+        stock_chart = create_stock_level_chart(summary_df)
+        if stock_chart:
+            st.plotly_chart(stock_chart, use_container_width=True)
     
     with col2:
-        st.markdown("#### 💰 Value by Category")
-        if valuation:
-            val_df = pd.DataFrame(valuation)
-            st.bar_chart(val_df.set_index('category')['total_value'])
-        else:
-            st.info("No data available")
+        category_chart = create_category_pie_chart(summary_df)
+        if category_chart:
+            st.plotly_chart(category_chart, use_container_width=True)
     
-    # Recent activity
     st.markdown("---")
-    st.markdown("#### 📜 Recent Transactions (Last 7 Days)")
     
-    recent_tx = InventoryDB.get_transactions(days=7)
-    if recent_tx:
-        df = pd.DataFrame(recent_tx)
-        df = df[['transaction_date', 'transaction_type', 'quantity_change', 'module_reference']].head(10)
-        df['transaction_date'] = pd.to_datetime(df['transaction_date']).dt.strftime('%Y-%m-%d %H:%M')
-        st.dataframe(df, use_container_width=True, hide_index=True)
-    else:
-        st.info("No recent transactions")
+    # Quick Actions
+    st.markdown("#### ⚡ Quick Actions")
+    
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        if low_stock_count > 0:
+            if st.button(f"🟡 View {low_stock_count} Low Stock Items", use_container_width=True):
+                st.session_state['inv_active_tab'] = 6  # Alerts tab
+                st.rerun()
+    
+    with col2:
+        if expiring_count > 0:
+            if st.button(f"🟡 View {expiring_count} Expiring Items", use_container_width=True):
+                st.session_state['inv_active_tab'] = 6  # Alerts tab
+                st.rerun()
+    
+    with col3:
+        if st.button("➕ Add New Stock", use_container_width=True, type="primary"):
+            st.session_state['inv_active_tab'] = 2  # Add Stock tab
+            st.rerun()
+    
+    with col4:
+        if st.button("📝 Create PO", use_container_width=True):
+            st.session_state['inv_active_tab'] = 5  # PO tab
+            st.rerun()
 
 
 # =====================================================
 # TAB 2: CURRENT INVENTORY
 # =====================================================
 
-def show_current_inventory(username: str, is_admin: bool):
-    """Display current inventory with search, filters, and editing"""
+def show_current_inventory_tab(user: Dict, is_admin: bool):
+    """View and edit current inventory"""
     
-    st.markdown("### 📦 Current Inventory")
+    st.markdown("### 📋 Current Inventory")
     
     # Controls
-    col1, col2, col3, col4 = st.columns([3, 2, 2, 1])
+    col1, col2, col3, col4 = st.columns([2, 2, 1, 1])
     
     with col1:
-        search = st.text_input("🔍 Search items", placeholder="Search by name...", key="inv_search")
+        search_term = st.text_input("🔍 Search items", key="inv_search")
     
     with col2:
         categories = InventoryDB.get_categories()
-        cat_options = ["All Categories"] + [c['category_name'] for c in categories]
-        category_filter = st.selectbox("Category", cat_options, key="inv_category")
+        category_filter = st.selectbox("Filter by category", ["All"] + categories, key="inv_category")
     
     with col3:
-        stock_filter = st.selectbox("Stock Status", 
-                                   ["All", "Good", "Low", "Critical"], key="inv_stock")
+        show_low_only = st.checkbox("Low stock only", key="inv_low_only")
     
     with col4:
-        if st.button("🔄 Refresh", use_container_width=True, key="refresh_inventory"):
+        if st.button("🔄 Refresh", key="inv_refresh", use_container_width=True):
+            st.session_state.inv_refresh_trigger += 1
             st.rerun()
     
-    # Load inventory
-    items = InventoryDB.get_all_items(active_only=True)
+    # Fetch data
+    with st.spinner("Loading inventory..."):
+        summary = InventoryDB.get_inventory_summary()
     
-    # Apply filters
-    if search:
-        items = [i for i in items if search.lower() in i['item_name'].lower()]
-    
-    if category_filter != "All Categories":
-        items = [i for i in items if i.get('category') == category_filter]
-    
-    if stock_filter != "All":
-        items = [i for i in items if i.get('stock_status') == stock_filter.lower()]
-    
-    if not items:
-        st.info("No items found")
+    if not summary:
+        st.info("No inventory items found.")
         return
     
-    # Summary metrics
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        st.metric("Items Shown", len(items))
-    with col2:
-        total_qty = sum(i['current_qty'] for i in items)
-        st.metric("Total Quantity", f"{total_qty:,.2f}")
-    with col3:
-        total_value = sum(i['current_qty'] * i.get('unit_cost', 0) for i in items)
-        st.metric("Total Value", f"₹{total_value:,.2f}")
-    with col4:
-        low_count = len([i for i in items if i.get('stock_status') in ['low', 'critical']])
-        st.metric("Need Attention", low_count)
+    df = pd.DataFrame(summary)
     
-    st.markdown("---")
+    # Apply filters
+    if search_term:
+        df = df[df['item_name'].str.contains(search_term, case=False, na=False)]
+    
+    if category_filter != "All":
+        df = df[df['category'] == category_filter]
+    
+    if show_low_only:
+        df = df[df['is_low_stock'] == True]
+    
+    if df.empty:
+        st.info("No items found matching filters.")
+        return
+    
+    st.success(f"✅ Found {len(df)} items")
+    
+    # Prepare display
+    display_df = df[[
+        'item_name', 'category', 'current_stock', 'unit', 'unit_cost',
+        'total_value', 'reorder_level', 'is_low_stock'
+    ]].copy()
+    
+    # Add status indicators
+    display_df['status'] = display_df.apply(
+        lambda row: get_stock_status_color(row['current_stock'], row['reorder_level']),
+        axis=1
+    )
+    
+    # Configure columns
+    column_config = {
+        "status": st.column_config.TextColumn("Status", width="small"),
+        "item_name": st.column_config.TextColumn("Item Name", width="large"),
+        "category": st.column_config.TextColumn("Category"),
+        "current_stock": st.column_config.NumberColumn("Stock", format="%.2f"),
+        "unit": st.column_config.TextColumn("Unit"),
+        "unit_cost": st.column_config.NumberColumn("Unit Cost", format="₹%.2f"),
+        "total_value": st.column_config.NumberColumn("Total Value", format="₹%.2f"),
+        "reorder_level": st.column_config.NumberColumn("Reorder Level", format="%.2f"),
+        "is_low_stock": st.column_config.CheckboxColumn("Low Stock", disabled=True)
+    }
     
     # Display table
-    df = pd.DataFrame(items)
+    st.dataframe(
+        display_df,
+        column_config=column_config,
+        use_container_width=True,
+        hide_index=True,
+        height=400
+    )
     
-    # Select and format columns
-    display_cols = [
-        'item_name', 'category', 'current_qty', 'unit', 'unit_cost',
-        'min_stock_level', 'reorder_threshold', 'max_stock_level',
-        'supplier_name', 'last_restocked', 'stock_status'
-    ]
-    
-    df_display = df[[col for col in display_cols if col in df.columns]].copy()
-    
-    # Format columns
-    df_display['current_qty'] = df_display['current_qty'].round(2)
-    df_display['unit_cost'] = df_display['unit_cost'].apply(lambda x: f"₹{x:,.2f}")
-    
-    if 'last_restocked' in df_display.columns:
-        df_display['last_restocked'] = pd.to_datetime(df_display['last_restocked'], errors='coerce').dt.strftime('%Y-%m-%d')
-    
-    # Add status indicator
-    status_map = {'good': '🟢 Good', 'low': '🟡 Low', 'critical': '🔴 Critical'}
-    df_display['stock_status'] = df_display['stock_status'].map(status_map)
-    
-    # Display
-    st.dataframe(df_display, use_container_width=True, hide_index=True, height=400)
-    
-    # Actions
+    # Export option
     col1, col2, col3 = st.columns([2, 1, 1])
     
-    with col1:
-        st.info("💡 Admin can edit items in Admin Panel → Module Management")
-    
     with col2:
-        if st.button("📥 Export to Excel", use_container_width=True, key="export_inventory_excel"):
-            export_inventory_excel(df_display, "current_inventory")
-    
-    with col3:
-        if is_admin:
-            if st.button("➕ Add New Item", use_container_width=True, type="primary", key="add_new_item_btn"):
-                st.session_state['show_add_item_form'] = True
-    
-    # Add item form (admin only)
-    if is_admin and st.session_state.get('show_add_item_form', False):
-        show_add_item_form(username)
+        if st.button("📥 Export to Excel", key="inv_export", use_container_width=True):
+            excel_file = export_to_excel({"Current Inventory": display_df}, "inventory.xlsx")
+            st.download_button(
+                label="📥 Download Excel",
+                data=excel_file,
+                file_name=f"inventory_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
 
 
-def show_add_item_form(username: str):
-    """Form to add new inventory item"""
+# =====================================================
+# TAB 3: ADD STOCK
+# =====================================================
+
+def show_add_stock_tab(user: Dict, is_admin: bool):
+    """Add stock with batch tracking"""
     
-    st.markdown("---")
-    st.markdown("#### ➕ Add New Item")
+    st.markdown("### ➕ Add Stock (Purchase)")
     
-    with st.form("add_item_form", clear_on_submit=True):
+    st.info("💡 Add new stock received from suppliers with batch and expiry tracking")
+    
+    # Get items and suppliers
+    items = InventoryDB.get_all_items(active_only=True)
+    suppliers = InventoryDB.get_all_suppliers(active_only=True)
+    
+    if not items:
+        st.warning("No inventory items found. Please add items first.")
+        return
+    
+    with st.form("add_stock_form", clear_on_submit=True):
         col1, col2 = st.columns(2)
         
         with col1:
-            item_name = st.text_input("Item Name *")
-            categories = InventoryDB.get_categories()
-            category = st.selectbox("Category *", [c['category_name'] for c in categories])
-            unit = st.text_input("Unit *", placeholder="kg, L, pcs, etc.")
-            unit_cost = st.number_input("Unit Cost (₹) *", min_value=0.0, step=1.0)
-        
-        with col2:
-            min_stock = st.number_input("Min Stock Level", min_value=0.0, step=1.0, value=0.0)
-            reorder_threshold = st.number_input("Reorder Threshold *", min_value=0.0, step=1.0)
-            max_stock = st.number_input("Max Stock Level", min_value=0.0, step=1.0)
-            reorder_qty = st.number_input("Reorder Quantity *", min_value=0.0, step=1.0)
-        
-        suppliers = InventoryDB.get_suppliers()
-        supplier_options = {s['supplier_name']: s['id'] for s in suppliers}
-        supplier = st.selectbox("Default Supplier", options=list(supplier_options.keys()))
-        
-        notes = st.text_area("Notes")
-        
-        col1, col2 = st.columns([3, 1])
-        with col2:
-            submitted = st.form_submit_button("➕ Add Item", type="primary", use_container_width=True)
-        
-        if submitted:
-            if not item_name or not unit:
-                st.error("Item name and unit are required")
-            else:
-                item_data = {
-                    'item_name': item_name,
-                    'category': category,
-                    'unit': unit,
-                    'unit_cost': unit_cost,
-                    'min_stock_level': min_stock,
-                    'reorder_threshold': reorder_threshold,
-                    'max_stock_level': max_stock if max_stock > 0 else None,
-                    'reorder_qty': reorder_qty,
-                    'supplier_id': supplier_options[supplier],
-                    'notes': notes,
-                    'is_active': True
-                }
-                
-                if InventoryDB.add_item(item_data, st.session_state.user['id']):
-                    st.success(f"✅ Added {item_name} to inventory!")
-                    st.session_state['show_add_item_form'] = False
-                    
-                    ActivityLogger.log(
-                        user_id=st.session_state.user['id'],
-                        action_type='add_inventory_item',
-                        module_key='inventory',
-                        description=f"Added new item: {item_name}"
-                    )
-                    st.rerun()
-
-
-# =====================================================
-# TAB 3: ADD STOCK (PURCHASE)
-# =====================================================
-
-def show_add_stock(username: str, is_admin: bool):
-    """Add stock with batch tracking"""
-    
-    st.markdown("### ➕ Add Stock (Purchase/Restock)")
-    st.info("💡 Record new stock purchases with batch tracking and expiry dates")
-    
-    with st.form("add_stock_form", clear_on_submit=True):
-        # Item selection
-        items = InventoryDB.get_all_items(active_only=True)
-        item_options = {f"{i['item_name']} (Current: {i['current_qty']} {i['unit']})": i for i in items}
-        
-        selected_item = st.selectbox("Select Item *", options=list(item_options.keys()))
-        item = item_options[selected_item]
-        
-        st.markdown("---")
-        
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            quantity = st.number_input("Quantity to Add *", min_value=0.01, step=1.0)
-            unit_cost = st.number_input("Unit Cost (₹) *", min_value=0.0, step=1.0, 
-                                       value=float(item.get('unit_cost', 0)))
-        
-        with col2:
-            batch_number = st.text_input("Batch/Lot Number *", 
-                                        value=f"BATCH-{datetime.now().strftime('%Y%m%d-%H%M%S')}")
-            expiry_date = st.date_input("Expiry Date", 
-                                       min_value=date.today(),
-                                       value=date.today() + timedelta(days=180))
-        
-        with col3:
-            suppliers = InventoryDB.get_suppliers()
-            supplier_options = {s['supplier_name']: s['id'] for s in suppliers}
-            supplier = st.selectbox("Supplier *", options=list(supplier_options.keys()))
+            # Item selection
+            item_options = {f"{item['item_name']} ({item['unit']})": item for item in items}
+            selected_item_key = st.selectbox("Select Item *", options=list(item_options.keys()))
+            selected_item = item_options[selected_item_key]
             
-            po_number = st.text_input("PO Number (optional)")
+            # Quantity
+            quantity = st.number_input(
+                f"Quantity ({selected_item['unit']}) *",
+                min_value=0.01,
+                value=1.0,
+                step=0.01
+            )
+            
+            # Unit cost
+            unit_cost = st.number_input(
+                "Unit Cost (₹) *",
+                min_value=0.01,
+                value=float(selected_item['unit_cost']),
+                step=0.01
+            )
+            
+            # Purchase date
+            purchase_date = st.date_input(
+                "Purchase Date *",
+                value=date.today(),
+                max_value=date.today()
+            )
         
-        notes = st.text_area("Notes")
-        
-        # Summary
-        st.markdown("---")
-        st.markdown("#### 📋 Purchase Summary")
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            st.metric("Current Stock", f"{item['current_qty']} {item['unit']}")
         with col2:
-            st.metric("After Purchase", f"{item['current_qty'] + quantity} {item['unit']}")
-        with col3:
-            total_cost = quantity * unit_cost
-            st.metric("Total Cost", f"₹{total_cost:,.2f}")
+            # Batch number
+            batch_number = st.text_input(
+                "Batch Number *",
+                value=f"BATCH-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+            )
+            
+            # Expiry date (optional)
+            has_expiry = st.checkbox("Has expiry date?", value=True)
+            expiry_date = None
+            if has_expiry:
+                expiry_date = st.date_input(
+                    "Expiry Date",
+                    value=date.today() + timedelta(days=180),
+                    min_value=date.today()
+                )
+            
+            # Supplier
+            if suppliers:
+                supplier_options = {"No supplier": None}
+                supplier_options.update({s['supplier_name']: s['id'] for s in suppliers})
+                selected_supplier = st.selectbox("Supplier", options=list(supplier_options.keys()))
+                supplier_id = supplier_options[selected_supplier]
+            else:
+                supplier_id = None
+                st.caption("⚠️ No suppliers found")
+            
+            # Notes
+            notes = st.text_area("Notes", height=100)
         
-        submitted = st.form_submit_button("➕ Add Stock", type="primary", use_container_width=True)
+        # Calculate total
+        total_cost = quantity * unit_cost
+        st.markdown(f"**Total Cost:** {format_currency(total_cost)}")
+        
+        st.markdown("---")
+        
+        # Submit
+        submitted = st.form_submit_button("✅ Add Stock", type="primary", use_container_width=True)
         
         if submitted:
-            if quantity <= 0:
-                st.error("Quantity must be greater than 0")
-            elif not batch_number:
-                st.error("Batch number is required")
+            if not batch_number:
+                st.error("❌ Batch number is required")
             else:
-                if InventoryDB.add_stock(
-                    item_id=item['id'],
+                success = InventoryDB.add_stock(
+                    item_id=selected_item['id'],
                     quantity=quantity,
                     unit_cost=unit_cost,
                     batch_number=batch_number,
                     expiry_date=expiry_date,
-                    supplier_id=supplier_options[supplier],
-                    user_id=st.session_state.user['id'],
+                    purchase_date=purchase_date,
+                    supplier_id=supplier_id,
                     notes=notes,
-                    po_number=po_number if po_number else None
-                ):
-                    st.success(f"✅ Added {quantity} {item['unit']} to {item['item_name']}")
-                    st.success(f"🏷️ Batch: {batch_number}")
+                    user_id=user['id']
+                )
+                
+                if success:
+                    st.success(f"✅ Added {quantity} {selected_item['unit']} of {selected_item['item_name']}")
                     
+                    # Log activity
                     ActivityLogger.log(
-                        user_id=st.session_state.user['id'],
-                        action_type='stock_add',
-                        module_key='inventory',
-                        description=f"Added {quantity} {item['unit']} of {item['item_name']}",
-                        metadata={'item_id': item['id'], 'quantity': quantity, 'batch': batch_number}
+                        user_id=user['id'],
+                        action_type='inventory_add',
+                        module_key='inventory_management',
+                        description=f"Added stock: {selected_item['item_name']} ({quantity} {selected_item['unit']})",
+                        metadata={'item': selected_item['item_name'], 'quantity': quantity, 'cost': total_cost}
                     )
+                    
+                    st.session_state.inv_refresh_trigger += 1
                     st.rerun()
+                else:
+                    st.error("❌ Failed to add stock")
 
 
 # =====================================================
-# TAB 4: REMOVE STOCK (USAGE)
+# TAB 4: REMOVE STOCK
 # =====================================================
 
-def show_remove_stock(username: str):
-    """Remove stock for module usage"""
+def show_remove_stock_tab(user: Dict, is_admin: bool):
+    """Remove stock (usage tracking)"""
     
     st.markdown("### ➖ Remove Stock (Usage)")
-    st.info("💡 Record stock usage by different farm modules")
+    
+    st.info("💡 Track stock usage by different farm modules")
+    
+    # Get items
+    items = InventoryDB.get_all_items(active_only=True)
+    
+    if not items:
+        st.warning("No inventory items found.")
+        return
+    
+    # Module options for usage tracking
+    farm_modules = [
+        "Biofloc Aquaculture",
+        "RAS Aquaculture",
+        "Microgreens",
+        "Hydroponics",
+        "Coco Coir",
+        "Open Field Crops",
+        "General Farm",
+        "Other"
+    ]
     
     with st.form("remove_stock_form", clear_on_submit=True):
-        # Item selection
-        items = InventoryDB.get_all_items(active_only=True)
-        item_options = {f"{i['item_name']} (Available: {i['current_qty']} {i['unit']})": i for i in items}
+        col1, col2 = st.columns(2)
         
-        selected_item = st.selectbox("Select Item *", options=list(item_options.keys()))
-        item = item_options[selected_item]
+        with col1:
+            # Item selection
+            item_options = {f"{item['item_name']} ({item['unit']}) - Stock: {item['current_stock']}": item for item in items}
+            selected_item_key = st.selectbox("Select Item *", options=list(item_options.keys()))
+            selected_item = item_options[selected_item_key]
+            
+            # Show current stock
+            st.metric("Current Stock", f"{selected_item['current_stock']} {selected_item['unit']}")
+            
+            # Quantity
+            max_qty = float(selected_item['current_stock'])
+            quantity = st.number_input(
+                f"Quantity to Remove ({selected_item['unit']}) *",
+                min_value=0.01,
+                max_value=max_qty if max_qty > 0 else 999999.0,
+                value=1.0,
+                step=0.01
+            )
+            
+            if quantity > max_qty:
+                st.warning(f"⚠️ Quantity exceeds current stock ({max_qty})")
+        
+        with col2:
+            # Module
+            module = st.selectbox("Used by Module *", options=farm_modules)
+            
+            # Reference ID (optional)
+            reference_id = st.text_input("Reference ID", help="Tank ID, Batch ID, etc.")
+            
+            # Notes
+            notes = st.text_area("Notes", height=100)
+        
+        # Calculate cost
+        estimated_cost = quantity * float(selected_item['unit_cost'])
+        st.markdown(f"**Estimated Cost:** {format_currency(estimated_cost)}")
         
         st.markdown("---")
         
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            quantity = st.number_input("Quantity to Remove *", 
-                                      min_value=0.01, 
-                                      max_value=float(item['current_qty']),
-                                      step=0.1)
-        
-        with col2:
-            modules = ["Biofloc", "RAS", "Microgreens", "Hydroponics", "Coco Coir", "Open Field", "General"]
-            module_ref = st.selectbox("Used by Module *", options=modules)
-        
-        with col3:
-            # Show batches for this item
-            batches = InventoryDB.get_batches(item_id=item['id'], active_only=True)
-            if batches:
-                batch_options = {f"{b['batch_number']} (Qty: {b['remaining_qty']})": b['id'] for b in batches}
-                selected_batch = st.selectbox("Batch (optional)", options=["Auto (FIFO)"] + list(batch_options.keys()))
-                batch_id = batch_options.get(selected_batch) if selected_batch != "Auto (FIFO)" else None
-            else:
-                st.info("No batches available")
-                batch_id = None
-        
-        notes = st.text_area("Notes")
-        
-        # Summary
-        st.markdown("---")
-        st.markdown("#### 📋 Usage Summary")
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            st.metric("Current Stock", f"{item['current_qty']} {item['unit']}")
-        with col2:
-            new_qty = item['current_qty'] - quantity
-            st.metric("After Usage", f"{new_qty} {item['unit']}")
-        with col3:
-            usage_cost = quantity * item.get('unit_cost', 0)
-            st.metric("Usage Cost", f"₹{usage_cost:,.2f}")
-        
-        # Warning if stock low
-        if new_qty <= item['reorder_threshold']:
-            st.warning(f"⚠️ Stock will be below reorder threshold ({item['reorder_threshold']} {item['unit']})")
-        
-        submitted = st.form_submit_button("➖ Remove Stock", type="secondary", use_container_width=True)
+        # Submit
+        submitted = st.form_submit_button("✅ Remove Stock", type="primary", use_container_width=True)
         
         if submitted:
-            if quantity <= 0:
-                st.error("Quantity must be greater than 0")
-            elif quantity > item['current_qty']:
-                st.error(f"Cannot remove {quantity} {item['unit']}. Only {item['current_qty']} {item['unit']} available!")
+            if quantity > max_qty:
+                st.error("❌ Cannot remove more than current stock")
             else:
-                if InventoryDB.remove_stock(
-                    item_id=item['id'],
+                success = InventoryDB.remove_stock(
+                    item_id=selected_item['id'],
                     quantity=quantity,
-                    module_reference=module_ref,
-                    user_id=st.session_state.user['id'],
+                    module=module,
+                    reference_id=reference_id,
                     notes=notes,
-                    batch_id=batch_id
-                ):
-                    st.success(f"✅ Removed {quantity} {item['unit']} from {item['item_name']}")
-                    st.success(f"📍 Used by: {module_ref}")
+                    user_id=user['id']
+                )
+                
+                if success:
+                    st.success(f"✅ Removed {quantity} {selected_item['unit']} of {selected_item['item_name']}")
                     
+                    # Log activity
                     ActivityLogger.log(
-                        user_id=st.session_state.user['id'],
-                        action_type='stock_remove',
-                        module_key='inventory',
-                        description=f"Removed {quantity} {item['unit']} of {item['item_name']} for {module_ref}",
-                        metadata={'item_id': item['id'], 'quantity': quantity, 'module': module_ref}
+                        user_id=user['id'],
+                        action_type='inventory_remove',
+                        module_key='inventory_management',
+                        description=f"Removed stock: {selected_item['item_name']} ({quantity} {selected_item['unit']}) for {module}",
+                        metadata={'item': selected_item['item_name'], 'quantity': quantity, 'module': module}
                     )
+                    
+                    st.session_state.inv_refresh_trigger += 1
                     st.rerun()
+                else:
+                    st.error("❌ Failed to remove stock")
 
 
 # =====================================================
 # TAB 5: STOCK ADJUSTMENTS
 # =====================================================
 
-def show_adjustments(username: str, is_admin: bool):
-    """Log stock adjustments (wastage, damage, etc.)"""
+def show_adjustments_tab(user: Dict, is_admin: bool):
+    """Stock adjustments (wastage, damage, etc.)"""
     
-    st.markdown("### 🔄 Stock Adjustments")
-    st.info("💡 Record wastage, damage, expiry, or stock count corrections")
+    st.markdown("### ⚖️ Stock Adjustments")
     
-    # Form to log adjustment
+    st.info("💡 Record stock wastage, damage, expiry, or other adjustments")
+    
+    # Get items
+    items = InventoryDB.get_all_items(active_only=True)
+    
+    if not items:
+        st.warning("No inventory items found.")
+        return
+    
+    # Adjustment types
+    adjustment_types = [
+        "wastage",
+        "damage",
+        "expired",
+        "lost",
+        "found",
+        "other"
+    ]
+    
     with st.form("adjustment_form", clear_on_submit=True):
         col1, col2 = st.columns(2)
         
         with col1:
-            items = InventoryDB.get_all_items(active_only=True)
-            item_options = {f"{i['item_name']} (Current: {i['current_qty']} {i['unit']})": i for i in items}
+            # Item selection
+            item_options = {f"{item['item_name']} ({item['unit']}) - Stock: {item['current_stock']}": item for item in items}
+            selected_item_key = st.selectbox("Select Item *", options=list(item_options.keys()))
+            selected_item = item_options[selected_item_key]
             
-            selected_item = st.selectbox("Select Item *", options=list(item_options.keys()))
-            item = item_options[selected_item]
-            
-            adjustment_types = ['wastage', 'damage', 'expired', 'theft', 'count_correction', 'other']
+            # Adjustment type
             adjustment_type = st.selectbox("Adjustment Type *", options=adjustment_types)
             
-            quantity = st.number_input("Quantity to Adjust *", min_value=0.01, step=0.1)
+            # Quantity
+            quantity = st.number_input(
+                f"Quantity ({selected_item['unit']}) *",
+                min_value=0.01,
+                value=1.0,
+                step=0.01,
+                help="Positive for additions, will be stored as absolute value"
+            )
         
         with col2:
-            # Show batches
-            batches = InventoryDB.get_batches(item_id=item['id'], active_only=True)
-            if batches:
-                batch_options = {f"{b['batch_number']} (Qty: {b['remaining_qty']})": b['id'] for b in batches}
-                selected_batch = st.selectbox("Batch (optional)", options=["Not specified"] + list(batch_options.keys()))
-                batch_id = batch_options.get(selected_batch) if selected_batch != "Not specified" else None
-            else:
-                st.info("No batches available")
-                batch_id = None
-            
-            reason = st.text_input("Reason *", placeholder="e.g., Spilled during transfer")
+            # Reason
+            reason = st.text_area(
+                "Reason *",
+                height=150,
+                help="Explain the reason for this adjustment"
+            )
         
-        notes = st.text_area("Additional Notes")
+        # Calculate cost impact
+        cost_impact = quantity * float(selected_item['unit_cost'])
+        st.markdown(f"**Cost Impact:** {format_currency(cost_impact)}")
         
-        submitted = st.form_submit_button("🔄 Log Adjustment", type="primary", use_container_width=True)
+        st.markdown("---")
+        
+        # Submit
+        submitted = st.form_submit_button("✅ Record Adjustment", type="primary", use_container_width=True)
         
         if submitted:
-            if not reason:
-                st.error("Reason is required")
-            elif quantity <= 0:
-                st.error("Quantity must be greater than 0")
+            if not reason or len(reason.strip()) < 10:
+                st.error("❌ Please provide a detailed reason (minimum 10 characters)")
             else:
-                if InventoryDB.log_adjustment(
-                    item_id=item['id'],
+                success = InventoryDB.record_adjustment(
+                    item_id=selected_item['id'],
                     adjustment_type=adjustment_type,
                     quantity=quantity,
                     reason=reason,
-                    user_id=st.session_state.user['id'],
-                    batch_id=batch_id,
-                    notes=notes
-                ):
-                    st.success(f"✅ Logged adjustment: {quantity} {item['unit']} ({adjustment_type})")
+                    user_id=user['id']
+                )
+                
+                if success:
+                    st.success(f"✅ Recorded {adjustment_type} adjustment: {quantity} {selected_item['unit']}")
                     
+                    # Log activity
                     ActivityLogger.log(
-                        user_id=st.session_state.user['id'],
-                        action_type='stock_adjustment',
-                        module_key='inventory',
-                        description=f"Adjusted {item['item_name']}: -{quantity} {item['unit']} ({adjustment_type})",
-                        metadata={'item_id': item['id'], 'type': adjustment_type, 'quantity': quantity}
+                        user_id=user['id'],
+                        action_type='inventory_adjustment',
+                        module_key='inventory_management',
+                        description=f"Stock adjustment: {selected_item['item_name']} - {adjustment_type} ({quantity} {selected_item['unit']})",
+                        metadata={'item': selected_item['item_name'], 'type': adjustment_type, 'quantity': quantity}
                     )
+                    
+                    st.session_state.inv_refresh_trigger += 1
                     st.rerun()
+                else:
+                    st.error("❌ Failed to record adjustment")
     
-    # Show recent adjustments
     st.markdown("---")
-    st.markdown("#### 📜 Recent Adjustments (Last 30 Days)")
     
-    adjustments = InventoryDB.get_adjustments(days=30)
+    # Recent adjustments
+    st.markdown("#### Recent Adjustments")
+    
+    adjustments = InventoryDB.get_recent_adjustments(limit=10)
     
     if adjustments:
         df = pd.DataFrame(adjustments)
+        display_cols = ['adjustment_date', 'item_name', 'adjustment_type', 'quantity', 'reason', 'adjusted_by']
         
-        # Flatten nested data
-        df['item_name'] = df['inventory_items'].apply(lambda x: x['item_name'] if x else '')
-        df['unit'] = df['inventory_items'].apply(lambda x: x['unit'] if x else '')
-        
-        display_df = df[['adjustment_date', 'item_name', 'adjustment_type', 
-                        'quantity_adjusted', 'unit', 'reason']].copy()
-        
-        display_df['adjustment_date'] = pd.to_datetime(display_df['adjustment_date']).dt.strftime('%Y-%m-%d')
-        
-        st.dataframe(display_df, use_container_width=True, hide_index=True)
+        if all(col in df.columns for col in display_cols):
+            display_df = df[display_cols].copy()
+            display_df.columns = ['Date', 'Item', 'Type', 'Quantity', 'Reason', 'User']
+            display_df['Date'] = pd.to_datetime(display_df['Date']).dt.strftime('%Y-%m-%d %H:%M')
+            
+            st.dataframe(display_df, use_container_width=True, hide_index=True)
     else:
-        st.info("No adjustments logged in the last 30 days")
+        st.info("No recent adjustments found")
 
 
 # =====================================================
 # TAB 6: PURCHASE ORDERS
 # =====================================================
 
-def show_purchase_orders(username: str, is_admin: bool):
-    """Create and manage purchase orders"""
+def show_purchase_orders_tab(user: Dict, is_admin: bool):
+    """Purchase order management"""
     
-    st.markdown("### 🛒 Purchase Orders")
+    st.markdown("### 📝 Purchase Orders")
     
-    tab1, tab2 = st.tabs(["📋 View POs", "➕ Create PO"])
+    if not is_admin:
+        st.info("ℹ️ Purchase order creation is restricted to admins. You can view existing POs below.")
     
-    with tab1:
-        show_po_list(is_admin)
+    # Get suppliers
+    suppliers = InventoryDB.get_all_suppliers(active_only=True)
+    items = InventoryDB.get_all_items(active_only=True)
     
-    with tab2:
-        if is_admin:
-            show_create_po(username)
-        else:
-            st.info("ℹ️ Only admins can create purchase orders")
-
-
-def show_po_list(is_admin: bool):
-    """Display list of purchase orders"""
+    if is_admin:
+        # Create new PO
+        with st.expander("➕ Create New Purchase Order", expanded=False):
+            if not suppliers:
+                st.warning("⚠️ No active suppliers found. Please add suppliers first.")
+            elif not items:
+                st.warning("⚠️ No inventory items found. Please add items first.")
+            else:
+                with st.form("create_po_form", clear_on_submit=True):
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        # Supplier
+                        supplier_options = {s['supplier_name']: s['id'] for s in suppliers}
+                        selected_supplier = st.selectbox("Supplier *", options=list(supplier_options.keys()))
+                        supplier_id = supplier_options[selected_supplier]
+                        
+                        # Order date
+                        order_date = st.date_input("Order Date *", value=date.today())
+                        
+                        # Expected delivery
+                        expected_delivery = st.date_input(
+                            "Expected Delivery",
+                            value=date.today() + timedelta(days=7),
+                            min_value=date.today()
+                        )
+                    
+                    with col2:
+                        # PO Number (auto-generated)
+                        po_number = st.text_input(
+                            "PO Number *",
+                            value=f"PO-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+                        )
+                        
+                        # Notes
+                        notes = st.text_area("Notes", height=100)
+                    
+                    st.markdown("---")
+                    st.markdown("#### Items")
+                    
+                    # Add items to PO
+                    num_items = st.number_input("Number of items in PO", min_value=1, max_value=20, value=1)
+                    
+                    po_items = []
+                    total_amount = 0
+                    
+                    for i in range(num_items):
+                        st.markdown(f"**Item {i+1}**")
+                        col1, col2, col3 = st.columns(3)
+                        
+                        with col1:
+                            item_options = {f"{item['item_name']} ({item['unit']})": item for item in items}
+                            selected_item_key = st.selectbox(
+                                "Item",
+                                options=list(item_options.keys()),
+                                key=f"po_item_{i}"
+                            )
+                            selected_item = item_options[selected_item_key]
+                        
+                        with col2:
+                            quantity = st.number_input(
+                                "Quantity",
+                                min_value=0.01,
+                                value=1.0,
+                                step=0.01,
+                                key=f"po_qty_{i}"
+                            )
+                        
+                        with col3:
+                            unit_cost = st.number_input(
+                                "Unit Cost (₹)",
+                                min_value=0.01,
+                                value=float(selected_item['unit_cost']),
+                                step=0.01,
+                                key=f"po_cost_{i}"
+                            )
+                        
+                        item_total = quantity * unit_cost
+                        st.caption(f"Item Total: {format_currency(item_total)}")
+                        
+                        po_items.append({
+                            'item_id': selected_item['id'],
+                            'quantity': quantity,
+                            'unit_cost': unit_cost
+                        })
+                        
+                        total_amount += item_total
+                    
+                    st.markdown(f"**Total PO Amount:** {format_currency(total_amount)}")
+                    
+                    st.markdown("---")
+                    
+                    # Submit
+                    submitted = st.form_submit_button("✅ Create Purchase Order", type="primary", use_container_width=True)
+                    
+                    if submitted:
+                        success, po_id = InventoryDB.create_purchase_order(
+                            po_number=po_number,
+                            supplier_id=supplier_id,
+                            order_date=order_date,
+                            expected_delivery=expected_delivery,
+                            notes=notes,
+                            items=po_items,
+                            user_id=user['id']
+                        )
+                        
+                        if success:
+                            st.success(f"✅ Purchase Order {po_number} created successfully!")
+                            
+                            # Log activity
+                            ActivityLogger.log(
+                                user_id=user['id'],
+                                action_type='po_created',
+                                module_key='inventory_management',
+                                description=f"Created PO {po_number} for supplier {selected_supplier}",
+                                metadata={'po_number': po_number, 'total': total_amount}
+                            )
+                            
+                            st.session_state.inv_refresh_trigger += 1
+                            st.rerun()
+                        else:
+                            st.error("❌ Failed to create purchase order")
     
+    st.markdown("---")
+    
+    # View existing POs
+    st.markdown("#### Existing Purchase Orders")
+    
+    # Status filter
     col1, col2, col3 = st.columns([2, 2, 1])
     
     with col1:
-        status_filter = st.selectbox("Filter by Status", 
-                                    ["All", "draft", "sent", "partial", "received", "closed", "cancelled"])
+        status_filter = st.selectbox("Filter by Status", ["All", "pending", "received", "cancelled"])
     
     with col2:
-        days = st.number_input("Days to show", min_value=30, max_value=365, value=90)
+        pass  # Reserved for future filters
     
     with col3:
-        if st.button("🔄 Refresh", key="refresh_po_list"):
+        if st.button("🔄 Refresh", key="po_refresh", use_container_width=True):
+            st.session_state.inv_refresh_trigger += 1
             st.rerun()
     
-    # Load POs
-    pos = InventoryDB.get_pos(status=None if status_filter == "All" else status_filter, days=days)
+    # Fetch POs
+    status = None if status_filter == "All" else status_filter
+    pos = InventoryDB.get_purchase_orders(status=status)
     
-    if not pos:
-        st.info("No purchase orders found")
-        return
-    
-    st.success(f"✅ Found {len(pos)} purchase orders")
-    
-    # Display
-    df = pd.DataFrame(pos)
-    
-    # Flatten supplier
-    df['supplier_name'] = df['suppliers'].apply(lambda x: x['supplier_name'] if x else '')
-    
-    display_df = df[['po_number', 'supplier_name', 'po_date', 'expected_delivery_date', 
-                     'status', 'total_amount']].copy()
-    
-    display_df['po_date'] = pd.to_datetime(display_df['po_date']).dt.strftime('%Y-%m-%d')
-    display_df['expected_delivery_date'] = pd.to_datetime(display_df['expected_delivery_date'], errors='coerce').dt.strftime('%Y-%m-%d')
-    display_df['total_amount'] = display_df['total_amount'].apply(lambda x: f"₹{x:,.2f}")
-    
-    st.dataframe(display_df, use_container_width=True, hide_index=True)
-
-
-def show_create_po(username: str):
-    """Form to create a new purchase order"""
-    
-    st.markdown("#### ➕ Create New Purchase Order")
-    
-    # Initialize session state for PO items
-    if 'po_items' not in st.session_state:
-        st.session_state.po_items = []
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        po_number = st.text_input("PO Number *", value=f"PO-{datetime.now().strftime('%Y%m%d-%H%M')}")
+    if pos:
+        df = pd.DataFrame(pos)
+        display_cols = ['po_number', 'supplier_name', 'order_date', 'expected_delivery', 'status', 'total_amount']
         
-        suppliers = InventoryDB.get_suppliers()
-        supplier_options = {s['supplier_name']: s['id'] for s in suppliers}
-        supplier = st.selectbox("Supplier *", options=list(supplier_options.keys()))
-    
-    with col2:
-        po_date = st.date_input("PO Date *", value=date.today())
-        expected_delivery = st.date_input("Expected Delivery", value=date.today() + timedelta(days=7))
-    
-    notes = st.text_area("Notes")
-    
-    st.markdown("---")
-    st.markdown("#### 📦 Add Items to PO")
-    
-    # Item selection
-    col1, col2, col3, col4 = st.columns([3, 1, 1, 1])
-    
-    with col1:
-        items = InventoryDB.get_all_items(active_only=True)
-        item_options = {i['item_name']: i for i in items}
-        selected_item_name = st.selectbox("Item", options=list(item_options.keys()), key="po_item_select")
-    
-    with col2:
-        item_qty = st.number_input("Quantity", min_value=0.1, step=1.0, key="po_item_qty")
-    
-    with col3:
-        item = item_options[selected_item_name]
-        item_cost = st.number_input("Unit Cost", min_value=0.0, step=1.0, 
-                                    value=float(item.get('unit_cost', 0)), key="po_item_cost")
-    
-    with col4:
-        st.markdown("<br>", unsafe_allow_html=True)
-        if st.button("➕ Add", use_container_width=True, key="add_po_item"):
-            po_item = {
-                'item_id': item['id'],
-                'item_name': item['item_name'],
-                'unit': item['unit'],
-                'ordered_qty': item_qty,
-                'unit_cost': item_cost,
-                'total': item_qty * item_cost
-            }
-            st.session_state.po_items.append(po_item)
-            st.rerun()
-    
-    # Display added items
-    if st.session_state.po_items:
-        st.markdown("#### 📋 PO Items")
-        
-        po_df = pd.DataFrame(st.session_state.po_items)
-        po_df['total'] = po_df['total'].apply(lambda x: f"₹{x:,.2f}")
-        po_df['unit_cost'] = po_df['unit_cost'].apply(lambda x: f"₹{x:,.2f}")
-        
-        st.dataframe(po_df[['item_name', 'ordered_qty', 'unit', 'unit_cost', 'total']], 
-                    use_container_width=True, hide_index=True)
-        
-        # Total
-        total_amount = sum(i['ordered_qty'] * i['unit_cost'] for i in st.session_state.po_items)
-        st.metric("Total PO Amount", f"₹{total_amount:,.2f}")
-        
-        # Actions
-        col1, col2, col3 = st.columns([2, 1, 1])
-        
-        with col2:
-            if st.button("🗑️ Clear Items", use_container_width=True, key="clear_po_items"):
-                st.session_state.po_items = []
-                st.rerun()
-        
-        with col3:
-            if st.button("✅ Create PO", type="primary", use_container_width=True, key="create_po_btn"):
-                po_data = {
-                    'po_number': po_number,
-                    'supplier_id': supplier_options[supplier],
-                    'po_date': po_date.isoformat(),
-                    'expected_delivery_date': expected_delivery.isoformat(),
-                    'status': 'draft',
-                    'total_amount': total_amount,
-                    'notes': notes
-                }
+        if all(col in df.columns for col in display_cols):
+            display_df = df[display_cols].copy()
+            display_df.columns = ['PO Number', 'Supplier', 'Order Date', 'Expected Delivery', 'Status', 'Total Amount']
+            display_df['Total Amount'] = display_df['Total Amount'].apply(lambda x: format_currency(x))
+            
+            st.dataframe(display_df, use_container_width=True, hide_index=True, height=400)
+            
+            # Mark as received (Admin only)
+            if is_admin:
+                st.markdown("---")
+                st.markdown("#### Mark PO as Received")
                 
-                po_items_data = [
-                    {
-                        'item_id': i['item_id'],
-                        'ordered_qty': i['ordered_qty'],
-                        'unit_cost': i['unit_cost']
-                    }
-                    for i in st.session_state.po_items
-                ]
-                
-                po_id = InventoryDB.create_po(po_data, po_items_data, st.session_state.user['id'])
-                
-                if po_id:
-                    st.success(f"✅ Purchase Order {po_number} created!")
-                    st.session_state.po_items = []
+                pending_pos = [p for p in pos if p['status'] == 'pending']
+                if pending_pos:
+                    po_options = {f"{p['po_number']} - {p['supplier_name']} ({format_currency(p['total_amount'])})": p for p in pending_pos}
+                    selected_po_key = st.selectbox("Select PO to mark as received", options=list(po_options.keys()))
+                    selected_po = po_options[selected_po_key]
                     
-                    ActivityLogger.log(
-                        user_id=st.session_state.user['id'],
-                        action_type='create_po',
-                        module_key='inventory',
-                        description=f"Created PO {po_number} for {supplier}",
-                        metadata={'po_id': po_id, 'total': total_amount}
-                    )
-                    st.rerun()
+                    if st.button(f"✅ Mark {selected_po['po_number']} as Received", type="primary"):
+                        if InventoryDB.mark_po_received(selected_po['id'], user['id']):
+                            st.success(f"✅ PO {selected_po['po_number']} marked as received!")
+                            
+                            # Log activity
+                            ActivityLogger.log(
+                                user_id=user['id'],
+                                action_type='po_received',
+                                module_key='inventory_management',
+                                description=f"Marked PO {selected_po['po_number']} as received",
+                                metadata={'po_number': selected_po['po_number']}
+                            )
+                            
+                            st.rerun()
+                        else:
+                            st.error("Failed to update PO status")
+                else:
+                    st.info("No pending POs to receive")
     else:
-        st.info("ℹ️ Add items to the purchase order above")
+        st.info("No purchase orders found")
 
 
 # =====================================================
-# TAB 7: ALERTS
+# TAB 7: ALERTS (LOW STOCK + EXPIRY)
 # =====================================================
 
-def show_alerts():
-    """Display low stock and expiry alerts"""
+def show_alerts_tab(user: Dict, is_admin: bool):
+    """Low stock and expiry alerts"""
     
-    st.markdown("### 🔔 Low Stock & Expiry Alerts")
+    st.markdown("### ⚠️ Alerts")
     
     col1, col2 = st.columns(2)
     
     with col1:
-        st.markdown("#### 📉 Low Stock Items")
+        st.markdown("#### 🟡 Low Stock Items")
         
         low_stock = InventoryDB.get_low_stock_items()
         
         if low_stock:
-            st.warning(f"⚠️ {len(low_stock)} items need reordering")
-            
             df = pd.DataFrame(low_stock)
-            df['reorder_cost'] = (df['reorder_qty'] * df['unit_cost']).round(2)
+            display_df = df[['item_name', 'category', 'current_stock', 'reorder_level', 'days_until_stockout']].copy()
+            display_df.columns = ['Item', 'Category', 'Current Stock', 'Reorder Level', 'Days Until Stockout']
             
-            display_df = df[['item_name', 'current_qty', 'unit', 'reorder_threshold', 
-                           'stock_level_pct', 'reorder_qty', 'supplier_name', 'reorder_cost']].copy()
-            
-            display_df['stock_level_pct'] = display_df['stock_level_pct'].apply(lambda x: f"{x}%")
-            display_df['reorder_cost'] = display_df['reorder_cost'].apply(lambda x: f"₹{x:,.2f}")
-            
-            st.dataframe(display_df, use_container_width=True, hide_index=True)
-            
-            # Total reorder cost
-            total_reorder = df['reorder_cost'].sum()
-            st.metric("Total Reorder Cost", f"₹{total_reorder:,.2f}")
-        else:
-            st.success("✅ All items are adequately stocked!")
-    
-    with col2:
-        st.markdown("#### ⏰ Expiring Items (30 Days)")
-        
-        expiring = InventoryDB.get_expiring_items(days_ahead=30)
-        
-        if expiring:
-            st.warning(f"⚠️ {len(expiring)} items expiring soon")
-            
-            df = pd.DataFrame(expiring)
-            
-            display_df = df[['item_name', 'batch_number', 'remaining_qty', 'unit', 
-                           'expiry_date', 'days_until_expiry', 'supplier_name']].copy()
-            
-            display_df['expiry_date'] = pd.to_datetime(display_df['expiry_date']).dt.strftime('%Y-%m-%d')
-            
-            # Color code by urgency
-            def highlight_urgency(row):
-                if row['days_until_expiry'] <= 7:
+            # Color code based on urgency
+            def highlight_urgent(row):
+                if row['Days Until Stockout'] <= 3:
                     return ['background-color: #ffcccc'] * len(row)
-                elif row['days_until_expiry'] <= 14:
+                elif row['Days Until Stockout'] <= 7:
                     return ['background-color: #fff4cc'] * len(row)
                 else:
                     return [''] * len(row)
             
+            styled_df = display_df.style.apply(highlight_urgent, axis=1)
+            st.dataframe(styled_df, use_container_width=True, hide_index=True)
+            
+            st.caption("🔴 Red: Critical (≤3 days) | 🟡 Yellow: Warning (≤7 days)")
+        else:
+            st.success("✅ All items are above reorder levels!")
+    
+    with col2:
+        st.markdown("#### 🔴 Expiring Items (Next 30 Days)")
+        
+        expiring = InventoryDB.get_expiring_items(days_ahead=30)
+        
+        if expiring:
+            df = pd.DataFrame(expiring)
+            display_df = df[['item_name', 'batch_number', 'quantity', 'expiry_date', 'days_until_expiry']].copy()
+            display_df.columns = ['Item', 'Batch', 'Quantity', 'Expiry Date', 'Days Left']
+            
+            # Add status indicator
+            display_df['Status'] = display_df['Days Left'].apply(
+                lambda x: '🔴 Expired' if x < 0 else ('🔴 Critical' if x <= 7 else '🟡 Warning')
+            )
+            
             st.dataframe(display_df, use_container_width=True, hide_index=True)
             
-            st.caption("🔴 Red: ≤7 days | 🟡 Yellow: ≤14 days")
+            st.caption("🔴 Expired/Critical (≤7 days) | 🟡 Warning (≤30 days)")
+            st.info("💡 Note: Expiry alerts are for information only. Expired items can still be used if needed.")
         else:
             st.success("✅ No items expiring in the next 30 days!")
+    
+    st.markdown("---")
+    
+    # Quick Actions
+    st.markdown("#### ⚡ Quick Actions")
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        if low_stock:
+            if st.button(f"📝 Create PO for {len(low_stock)} Items", use_container_width=True, type="primary"):
+                st.info("💡 Navigate to Purchase Orders tab to create PO")
+    
+    with col2:
+        if expiring:
+            if st.button("📊 View Expiring Stock Details", use_container_width=True):
+                st.info("💡 Check Current Inventory tab for batch details")
+    
+    with col3:
+        if st.button("📥 Export Alerts", use_container_width=True):
+            sheets = {}
+            if low_stock:
+                sheets['Low Stock'] = pd.DataFrame(low_stock)
+            if expiring:
+                sheets['Expiring'] = pd.DataFrame(expiring)
+            
+            if sheets:
+                excel_file = export_to_excel(sheets, "alerts.xlsx")
+                st.download_button(
+                    label="📥 Download Excel",
+                    data=excel_file,
+                    file_name=f"inventory_alerts_{datetime.now().strftime('%Y%m%d')}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
 
 
 # =====================================================
 # TAB 8: TRANSACTION HISTORY
 # =====================================================
 
-def show_transaction_history(is_admin: bool):
-    """Display full transaction history with filters and delete option"""
+def show_history_tab(user: Dict, is_admin: bool):
+    """Complete transaction history"""
     
     st.markdown("### 📜 Transaction History")
     
@@ -879,255 +1079,254 @@ def show_transaction_history(is_admin: bool):
     col1, col2, col3, col4 = st.columns(4)
     
     with col1:
-        days = st.number_input("Days to show", min_value=7, max_value=365, value=30)
+        days_back = st.number_input("Days to show", min_value=1, max_value=365, value=30)
     
     with col2:
-        tx_types = ["All", "add", "remove", "adjustment"]
-        tx_type = st.selectbox("Type", tx_types)
+        transaction_types = ['All', 'purchase', 'usage', 'adjustment', 'wastage', 'damage', 'return']
+        type_filter = st.selectbox("Transaction Type", options=transaction_types)
     
     with col3:
-        modules = ["All", "Biofloc", "RAS", "Microgreens", "Hydroponics", "Coco Coir", "Open Field", "General"]
-        module = st.selectbox("Module", modules)
+        items = InventoryDB.get_all_items()
+        item_filter = st.selectbox("Filter by Item", options=["All"] + [item['item_name'] for item in items])
     
     with col4:
-        if st.button("🔄 Refresh", use_container_width=True, key="refresh_tx_history"):
+        if st.button("🔄 Refresh", key="history_refresh", use_container_width=True):
+            st.session_state.inv_refresh_trigger += 1
             st.rerun()
     
-    # Load transactions
-    transactions = InventoryDB.get_transactions(
-        days=days,
-        transaction_type=None if tx_type == "All" else tx_type,
-        module=None if module == "All" else module
+    # Fetch transactions
+    start_date = date.today() - timedelta(days=days_back)
+    transaction_type = None if type_filter == "All" else type_filter
+    item_name = None if item_filter == "All" else item_filter
+    
+    transactions = InventoryDB.get_transaction_history(
+        start_date=start_date,
+        transaction_type=transaction_type,
+        item_name=item_name
     )
     
-    if not transactions:
-        st.info("No transactions found")
-        return
-    
-    st.success(f"✅ Found {len(transactions)} transactions")
-    
-    # Display
-    df = pd.DataFrame(transactions)
-    
-    # Flatten nested data
-    df['item_name'] = df['inventory_items'].apply(lambda x: x['item_name'] if x else '')
-    df['unit'] = df['inventory_items'].apply(lambda x: x['unit'] if x else '')
-    
-    display_df = df[['id', 'transaction_date', 'item_name', 'transaction_type', 
-                     'quantity_change', 'unit', 'new_balance', 'unit_cost', 
-                     'module_reference', 'notes']].copy()
-    
-    display_df['transaction_date'] = pd.to_datetime(display_df['transaction_date']).dt.strftime('%Y-%m-%d %H:%M')
-    
-    if 'unit_cost' in display_df.columns:
-        display_df['unit_cost'] = display_df['unit_cost'].apply(
-            lambda x: f"₹{x:,.2f}" if pd.notna(x) else ''
-        )
-    
-    st.dataframe(display_df, use_container_width=True, hide_index=True, height=400)
-    
-    # Export and delete options
-    col1, col2, col3 = st.columns([2, 1, 1])
-    
-    with col2:
-        if st.button("📥 Export to CSV", use_container_width=True, key="export_tx_csv"):
-            csv = display_df.to_csv(index=False)
-            st.download_button(
-                label="Download CSV",
-                data=csv,
-                file_name=f"inventory_transactions_{date.today()}.csv",
-                mime="text/csv"
-            )
-    
-    with col3:
-        if is_admin:
-            st.info("💡 Select transaction ID to delete (coming soon)")
+    if transactions:
+        df = pd.DataFrame(transactions)
+        
+        # Calculate totals
+        total_purchases = df[df['transaction_type'] == 'purchase']['total_cost'].sum()
+        total_usage = df[df['transaction_type'] == 'usage']['total_cost'].sum()
+        total_wastage = df[df['transaction_type'].isin(['wastage', 'damage'])]['total_cost'].sum()
+        
+        # Show summary
+        st.markdown("#### 📊 Summary")
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            st.metric("Total Transactions", len(df))
+        with col2:
+            st.metric("Purchases", format_currency(total_purchases))
+        with col3:
+            st.metric("Usage", format_currency(total_usage))
+        with col4:
+            st.metric("Wastage/Damage", format_currency(total_wastage))
+        
+        st.markdown("---")
+        
+        # Display transactions
+        display_cols = ['transaction_date', 'item_name', 'transaction_type', 'quantity', 
+                       'unit_cost', 'total_cost', 'reference_module', 'notes', 'performed_by']
+        
+        if all(col in df.columns for col in display_cols):
+            display_df = df[display_cols].copy()
+            display_df.columns = ['Date', 'Item', 'Type', 'Quantity', 'Unit Cost', 
+                                 'Total Cost', 'Module', 'Notes', 'User']
+            display_df['Date'] = pd.to_datetime(display_df['Date']).dt.strftime('%Y-%m-%d %H:%M')
+            display_df['Unit Cost'] = display_df['Unit Cost'].apply(lambda x: format_currency(x) if pd.notna(x) else '-')
+            display_df['Total Cost'] = display_df['Total Cost'].apply(lambda x: format_currency(x) if pd.notna(x) else '-')
+            
+            st.dataframe(display_df, use_container_width=True, hide_index=True, height=400)
+            
+            # Export option
+            if st.button("📥 Export History", key="history_export"):
+                excel_file = export_to_excel({"Transaction History": display_df}, "transaction_history.xlsx")
+                st.download_button(
+                    label="📥 Download Excel",
+                    data=excel_file,
+                    file_name=f"transaction_history_{datetime.now().strftime('%Y%m%d')}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
+    else:
+        st.info("No transactions found for the selected filters")
 
 
 # =====================================================
 # TAB 9: SUPPLIERS
 # =====================================================
 
-def show_suppliers(username: str, is_admin: bool):
-    """Manage suppliers"""
+def show_suppliers_tab(user: Dict, is_admin: bool):
+    """Supplier management"""
     
-    st.markdown("### 👥 Supplier Management")
+    st.markdown("### 🏢 Suppliers")
     
+    if not is_admin:
+        st.info("ℹ️ Supplier management is restricted to admins. You can view suppliers below.")
+    
+    # Add new supplier (Admin only)
     if is_admin:
-        tab1, tab2 = st.tabs(["📋 View Suppliers", "➕ Add Supplier"])
-        
-        with tab1:
-            show_supplier_list()
-        
-        with tab2:
-            show_add_supplier(username)
-    else:
-        show_supplier_list()
-
-
-def show_supplier_list():
-    """Display list of suppliers"""
-    
-    suppliers = InventoryDB.get_suppliers(active_only=False)
-    
-    if not suppliers:
-        st.info("No suppliers found")
-        return
-    
-    st.success(f"✅ {len(suppliers)} suppliers registered")
-    
-    df = pd.DataFrame(suppliers)
-    
-    display_cols = ['supplier_name', 'contact_person', 'phone', 'email', 
-                   'payment_terms', 'is_active']
-    
-    df_display = df[[col for col in display_cols if col in df.columns]].copy()
-    df_display['is_active'] = df_display['is_active'].map({True: '✅ Active', False: '❌ Inactive'})
-    
-    st.dataframe(df_display, use_container_width=True, hide_index=True)
-
-
-def show_add_supplier(username: str):
-    """Form to add new supplier"""
-    
-    st.markdown("#### ➕ Add New Supplier")
-    
-    with st.form("add_supplier_form", clear_on_submit=True):
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            supplier_name = st.text_input("Supplier Name *")
-            contact_person = st.text_input("Contact Person")
-            phone = st.text_input("Phone *")
-        
-        with col2:
-            email = st.text_input("Email")
-            payment_terms = st.text_input("Payment Terms", placeholder="e.g., 30 days, Cash")
-        
-        address = st.text_area("Address")
-        notes = st.text_area("Notes")
-        
-        submitted = st.form_submit_button("➕ Add Supplier", type="primary", use_container_width=True)
-        
-        if submitted:
-            if not supplier_name or not phone:
-                st.error("Supplier name and phone are required")
-            else:
-                supplier_data = {
-                    'supplier_name': supplier_name,
-                    'contact_person': contact_person,
-                    'phone': phone,
-                    'email': email,
-                    'payment_terms': payment_terms,
-                    'address': address,
-                    'notes': notes,
-                    'is_active': True
-                }
+        with st.expander("➕ Add New Supplier", expanded=False):
+            with st.form("add_supplier_form", clear_on_submit=True):
+                col1, col2 = st.columns(2)
                 
-                if InventoryDB.add_supplier(supplier_data):
-                    st.success(f"✅ Added supplier: {supplier_name}")
-                    
-                    ActivityLogger.log(
-                        user_id=st.session_state.user['id'],
-                        action_type='add_supplier',
-                        module_key='inventory',
-                        description=f"Added supplier: {supplier_name}"
-                    )
-                    st.rerun()
+                with col1:
+                    supplier_name = st.text_input("Supplier Name *")
+                    contact_person = st.text_input("Contact Person")
+                    phone = st.text_input("Phone")
+                
+                with col2:
+                    email = st.text_input("Email")
+                    address = st.text_area("Address", height=100)
+                    notes = st.text_area("Notes", height=100)
+                
+                submitted = st.form_submit_button("✅ Add Supplier", type="primary", use_container_width=True)
+                
+                if submitted:
+                    if not supplier_name:
+                        st.error("❌ Supplier name is required")
+                    else:
+                        success = InventoryDB.add_supplier(
+                            supplier_name=supplier_name,
+                            contact_person=contact_person,
+                            phone=phone,
+                            email=email,
+                            address=address,
+                            notes=notes,
+                            user_id=user['id']
+                        )
+                        
+                        if success:
+                            st.success(f"✅ Supplier '{supplier_name}' added successfully!")
+                            
+                            # Log activity
+                            ActivityLogger.log(
+                                user_id=user['id'],
+                                action_type='supplier_added',
+                                module_key='inventory_management',
+                                description=f"Added supplier: {supplier_name}",
+                                metadata={'supplier': supplier_name}
+                            )
+                            
+                            st.session_state.inv_refresh_trigger += 1
+                            st.rerun()
+                        else:
+                            st.error("❌ Failed to add supplier (may already exist)")
+    
+    st.markdown("---")
+    
+    # View suppliers
+    st.markdown("#### Active Suppliers")
+    
+    col1, col2 = st.columns([3, 1])
+    
+    with col2:
+        if st.button("🔄 Refresh", key="suppliers_refresh", use_container_width=True):
+            st.session_state.inv_refresh_trigger += 1
+            st.rerun()
+    
+    suppliers = InventoryDB.get_all_suppliers(active_only=True)
+    
+    if suppliers:
+        df = pd.DataFrame(suppliers)
+        display_cols = ['supplier_name', 'contact_person', 'phone', 'email', 'address']
+        
+        if all(col in df.columns for col in display_cols):
+            display_df = df[display_cols].copy()
+            display_df.columns = ['Supplier Name', 'Contact Person', 'Phone', 'Email', 'Address']
+            
+            st.dataframe(display_df, use_container_width=True, hide_index=True, height=400)
+    else:
+        st.info("No active suppliers found")
 
 
 # =====================================================
-# TAB 10: ANALYTICS & REPORTS
+# TAB 10: ANALYTICS
 # =====================================================
 
-def show_analytics():
+def show_analytics_tab(user: Dict, is_admin: bool):
     """Analytics and reports"""
     
     st.markdown("### 📈 Analytics & Reports")
     
-    # Inventory valuation
-    st.markdown("#### 💰 Inventory Valuation by Category")
-    
-    valuation = InventoryDB.get_inventory_valuation()
-    
-    if valuation:
-        df = pd.DataFrame(valuation)
-        
-        col1, col2 = st.columns([2, 1])
-        
-        with col1:
-            st.bar_chart(df.set_index('category')['total_value'])
-        
-        with col2:
-            df['total_value'] = df['total_value'].apply(lambda x: f"₹{x:,.2f}")
-            st.dataframe(df, use_container_width=True, hide_index=True)
-        
-        total_value = sum(v['total_value'] for v in valuation if isinstance(v['total_value'], (int, float)))
-        st.metric("Total Inventory Value", f"₹{total_value:,.2f}")
-    
-    st.markdown("---")
-    
-    # Consumption by module
-    st.markdown("#### 📊 Consumption by Module (Last 30 Days)")
-    
-    consumption = InventoryDB.get_consumption_by_module(days=30)
-    
-    if consumption:
-        df = pd.DataFrame.from_dict(consumption, orient='index')
-        df = df.reset_index()
-        df.columns = ['Module', 'Quantity', 'Cost', 'Transactions']
-        df['Cost'] = df['Cost'].apply(lambda x: f"₹{x:,.2f}")
-        
-        st.dataframe(df, use_container_width=True, hide_index=True)
-    else:
-        st.info("No consumption data available")
-    
-    st.markdown("---")
-    
-    # Export options
-    st.markdown("#### 📥 Export Reports")
-    
-    col1, col2, col3 = st.columns(3)
+    # Date range selector
+    col1, col2, col3 = st.columns([2, 2, 1])
     
     with col1:
-        if st.button("📊 Complete Inventory", use_container_width=True, key="export_complete_inv"):
-            items = InventoryDB.get_all_items()
-            export_inventory_excel(pd.DataFrame(items), "complete_inventory")
+        start_date = st.date_input(
+            "Start Date",
+            value=date.today() - timedelta(days=30)
+        )
     
     with col2:
-        if st.button("📉 Low Stock Report", use_container_width=True, key="export_low_stock"):
-            low_stock = InventoryDB.get_low_stock_items()
-            export_inventory_excel(pd.DataFrame(low_stock), "low_stock_report")
+        end_date = st.date_input(
+            "End Date",
+            value=date.today()
+        )
     
     with col3:
-        if st.button("⏰ Expiry Report", use_container_width=True, key="export_expiry"):
-            expiring = InventoryDB.get_expiring_items(days_ahead=60)
-            export_inventory_excel(pd.DataFrame(expiring), "expiry_report")
-
-
-# =====================================================
-# HELPER FUNCTIONS
-# =====================================================
-
-def export_inventory_excel(df: pd.DataFrame, filename: str):
-    """Export dataframe to Excel"""
+        if st.button("🔄 Refresh", key="analytics_refresh", use_container_width=True):
+            st.session_state.inv_refresh_trigger += 1
+            st.rerun()
     
-    output = BytesIO()
+    # Module consumption report
+    st.markdown("#### 📊 Consumption by Module")
     
-    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-        df.to_excel(writer, sheet_name='Inventory', index=False)
+    modules = [
+        "Biofloc Aquaculture",
+        "RAS Aquaculture",
+        "Microgreens",
+        "Hydroponics",
+        "Coco Coir",
+        "Open Field Crops",
+        "General Farm"
+    ]
+    
+    module_consumption = []
+    for module in modules:
+        consumption = InventoryDB.get_module_consumption(
+            module_name=module,
+            start_date=start_date,
+            end_date=end_date
+        )
+        if consumption:
+            module_consumption.extend(consumption)
+    
+    if module_consumption:
+        df = pd.DataFrame(module_consumption)
         
-        # Auto-adjust column widths
-        worksheet = writer.sheets['Inventory']
-        for i, col in enumerate(df.columns):
-            max_len = max(df[col].astype(str).apply(len).max(), len(col)) + 2
-            worksheet.set_column(i, i, max_len)
-    
-    output.seek(0)
-    
-    st.download_button(
-        label="📥 Download Excel",
-        data=output,
-        file_name=f"{filename}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    )
+        # Summary by module
+        summary = df.groupby('reference_module').agg({
+            'total_quantity': 'sum',
+            'total_cost': 'sum'
+        }).reset_index()
+        summary.columns = ['Module', 'Total Quantity', 'Total Cost']
+        summary['Total Cost'] = summary['Total Cost'].apply(format_currency)
+        
+        st.dataframe(summary, use_container_width=True, hide_index=True)
+        
+        # Detailed breakdown
+        with st.expander("📋 Detailed Breakdown"):
+            detail_df = df[['reference_module', 'item_name', 'total_quantity', 'total_cost']].copy()
+            detail_df.columns = ['Module', 'Item', 'Quantity', 'Cost']
+            detail_df['Cost'] = detail_df['Cost'].apply(format_currency)
+            st.dataframe(detail_df, use_container_width=True, hide_index=True)
+        
+        # Export
+        if st.button("📥 Export Analytics", key="analytics_export"):
+            sheets = {
+                'Summary by Module': summary,
+                'Detailed Breakdown': detail_df
+            }
+            excel_file = export_to_excel(sheets, "analytics.xlsx")
+            st.download_button(
+                label="📥 Download Excel",
+                data=excel_file,
+                file_name=f"inventory_analytics_{datetime.now().strftime('%Y%m%d')}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+    else:
+        st.info("No consumption data found for the selected date range")
