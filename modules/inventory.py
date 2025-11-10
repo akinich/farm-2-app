@@ -3,6 +3,13 @@ Inventory Management Module
 Complete inventory system with batch tracking, FIFO, expiry management, and cost tracking
 
 VERSION HISTORY:
+2.1.2 - Resolved alerts column mismatch - 10/11/25
+      FIXES:
+      - Handle optional columns when renaming low stock alerts table
+      - Prevent pandas length mismatch errors in Alerts tab
+      CHANGES:
+      - show_alerts_tab
+
 2.1.1 - Fixed duplicate button IDs - 10/11/25
       FIXES:
       - Added unique key parameters to all refresh buttons
