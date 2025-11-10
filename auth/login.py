@@ -2,7 +2,7 @@
 Login Page and Authentication UI
 Farm Management System
 
-VERSION: 1.1.1 - Fixed password reset token extraction
+VERSION: 1.1.2 - Improved token handling with session state + debugging
 """
 import streamlit as st
 from auth.session import SessionManager
@@ -14,6 +14,14 @@ def show_login_page():
     # Check for password recovery tokens in URL
     # Use JavaScript to extract hash parameters since Streamlit can't access them directly
     recovery_token = extract_recovery_token()
+
+    # Debug info (remove after testing)
+    query_params = st.query_params
+    if 'access_token' in query_params or 'recovery_token' in st.session_state:
+        st.sidebar.write("🔍 Debug Info:")
+        st.sidebar.write(f"Query params: {dict(query_params)}")
+        st.sidebar.write(f"Token in session: {'recovery_token' in st.session_state}")
+        st.sidebar.write(f"Token found: {recovery_token is not None}")
 
     # Center the login form
     col1, col2, col3 = st.columns([1, 2, 1])
@@ -42,36 +50,37 @@ def show_login_page():
 def extract_recovery_token():
     """Extract recovery token from URL hash using JavaScript"""
 
-    # First check if we already have the token in query params
+    # Check if we already extracted the token in session state
+    if 'recovery_token' in st.session_state and st.session_state.recovery_token:
+        return st.session_state.recovery_token
+
+    # Check if token is in query params (after JavaScript redirect)
     query_params = st.query_params
     if 'access_token' in query_params and query_params.get('type') == 'recovery':
-        return query_params['access_token']
+        token = query_params['access_token']
+        # Store in session state
+        st.session_state.recovery_token = token
+        return token
 
-    # If not in query params, inject JavaScript to convert hash to query params
+    # JavaScript to extract from hash and store in session state via query params
     js_code = """
     <script>
-        // Only run once
-        if (!window.hashProcessed) {
-            window.hashProcessed = true;
+        const hash = window.location.hash;
 
-            // Get the URL hash
-            const hash = window.location.hash;
+        if (hash && hash.includes('access_token') && hash.includes('type=recovery')) {
+            // Parse hash parameters
+            const params = new URLSearchParams(hash.substring(1));
+            const accessToken = params.get('access_token');
+            const type = params.get('type');
 
-            if (hash) {
-                // Parse the hash parameters
-                const params = new URLSearchParams(hash.substring(1));
-                const accessToken = params.get('access_token');
-                const type = params.get('type');
+            if (type === 'recovery' && accessToken) {
+                // Build new URL with query params
+                const currentUrl = window.location.href.split('#')[0].split('?')[0];
+                const newUrl = currentUrl + '?access_token=' + encodeURIComponent(accessToken) + '&type=recovery';
 
-                // If it's a recovery token, convert hash to query params
-                if (type === 'recovery' && accessToken) {
-                    // Build new URL with query params instead of hash
-                    const url = new URL(window.location.href.split('#')[0]);
-                    url.searchParams.set('access_token', accessToken);
-                    url.searchParams.set('type', type);
-
-                    // Redirect to URL with query params (Streamlit can read these)
-                    window.location.href = url.toString();
+                // Redirect to clean URL with query params
+                if (window.location.href !== newUrl) {
+                    window.location.replace(newUrl);
                 }
             }
         }
@@ -121,7 +130,9 @@ def handle_password_reset(recovery_token: str, new_password: str):
             st.success("✅ Password reset successful! You can now login with your new password.")
             st.info("Click below to go to login page")
             if st.button("Go to Login", use_container_width=True, type="primary"):
-                # Clear query parameters to return to clean login page
+                # Clear recovery token from session state and query params
+                if 'recovery_token' in st.session_state:
+                    del st.session_state.recovery_token
                 st.query_params.clear()
                 st.rerun()
         else:
