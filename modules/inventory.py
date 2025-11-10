@@ -3,6 +3,15 @@ Inventory Management Module
 Complete inventory system with batch tracking, FIFO, expiry management, and cost tracking
 
 VERSION HISTORY:
+2.1.1 - Fixed duplicate button IDs - 10/11/25
+      FIXES:
+      - Added unique key parameters to all refresh buttons
+      - Added unique key parameters to all export buttons
+      - Prevents StreamlitDuplicateElementId errors
+      CHANGES:
+      - refresh_current_stock, refresh_pos, refresh_alerts, refresh_history, refresh_master_items
+      - export_current_stock, export_pos, export_history, export_consumption
+      
 2.1.0 - Complete rewrite for schema v2.0.0 compatibility - 10/11/25
       FIXES:
       - Compatible with item_master and inventory_batches tables
@@ -290,7 +299,7 @@ def show_current_stock_tab(username: str, is_admin: bool):
         batch_filter = st.selectbox("Batch Status", ["All", "Active Only", "Depleted"], key="stock_batch")
     
     with col4:
-        if st.button("🔄 Refresh", use_container_width=True):
+        if st.button("🔄 Refresh", use_container_width=True, key="refresh_current_stock"):
             st.session_state.inv_refresh_trigger += 1
             st.rerun()
     
@@ -375,7 +384,7 @@ def show_current_stock_tab(username: str, is_admin: bool):
     col1, col2, col3 = st.columns([2, 1, 1])
     
     with col2:
-        if st.button("📥 Export to Excel", use_container_width=True):
+        if st.button("📥 Export to Excel", use_container_width=True, key="export_current_stock"):
             export_to_excel(display_df, "current_stock")
     
     # Summary stats
@@ -754,7 +763,7 @@ def show_all_purchase_orders(username: str, is_admin: bool):
         days_back = st.number_input("Days to show", min_value=7, max_value=365, value=30)
     
     with col3:
-        if st.button("🔄 Refresh", use_container_width=True):
+        if st.button("🔄 Refresh", use_container_width=True, key="refresh_pos"):
             st.rerun()
     
     # Load POs
@@ -811,7 +820,7 @@ def show_all_purchase_orders(username: str, is_admin: bool):
     st.dataframe(display_df, use_container_width=True, hide_index=True, height=500)
     
     # Export
-    if st.button("📥 Export to Excel", use_container_width=True):
+    if st.button("📥 Export to Excel", use_container_width=True, key="export_pos"):
         export_to_excel(display_df, "purchase_orders")
 
 
@@ -958,7 +967,7 @@ def show_alerts_tab(username: str):
         days_ahead = st.number_input("Days Ahead", min_value=7, max_value=365, value=30)
     
     with col2:
-        if st.button("🔄 Refresh Alerts", use_container_width=True):
+        if st.button("🔄 Refresh Alerts", use_container_width=True, key="refresh_alerts"):
             st.rerun()
     
     with st.spinner("Loading expiring items..."):
@@ -1039,7 +1048,7 @@ def show_history_tab(username: str, is_admin: bool):
         item_filter = st.selectbox("Item", options=item_names)
     
     with col4:
-        if st.button("🔄 Refresh", use_container_width=True):
+        if st.button("🔄 Refresh", use_container_width=True, key="refresh_history"):
             st.rerun()
     
     # Load transactions
@@ -1092,7 +1101,7 @@ def show_history_tab(username: str, is_admin: bool):
     st.dataframe(display_df, use_container_width=True, hide_index=True, height=500)
     
     # Export
-    if st.button("📥 Export to Excel", use_container_width=True):
+    if st.button("📥 Export to Excel", use_container_width=True, key="export_history"):
         export_to_excel(display_df, "transaction_history")
 
 
@@ -1134,7 +1143,7 @@ def show_all_master_items():
         category_filter = st.selectbox("Category", ["All"] + categories)
     
     with col3:
-        if st.button("🔄 Refresh", use_container_width=True):
+        if st.button("🔄 Refresh", use_container_width=True, key="refresh_master_items"):
             st.rerun()
     
     # Load items
@@ -1525,7 +1534,7 @@ def show_consumption_analytics():
         st.dataframe(display_df, use_container_width=True, hide_index=True)
         
         # Export
-        if st.button("📥 Export Report", use_container_width=True):
+        if st.button("📥 Export Report", use_container_width=True, key="export_consumption"):
             export_to_excel(display_df, "consumption_report")
     else:
         st.info("No consumption data found for selected period")
