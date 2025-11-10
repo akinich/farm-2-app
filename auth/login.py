@@ -2,7 +2,7 @@
 Login Page and Authentication UI
 Farm Management System
 
-VERSION: 1.1.0 - Added password reset functionality
+VERSION: 1.1.1 - Fixed password reset token extraction
 """
 import streamlit as st
 from auth.session import SessionManager
@@ -42,43 +42,44 @@ def show_login_page():
 def extract_recovery_token():
     """Extract recovery token from URL hash using JavaScript"""
 
-    # JavaScript to read URL hash and extract access_token and type
+    # First check if we already have the token in query params
+    query_params = st.query_params
+    if 'access_token' in query_params and query_params.get('type') == 'recovery':
+        return query_params['access_token']
+
+    # If not in query params, inject JavaScript to convert hash to query params
     js_code = """
     <script>
-        // Get the URL hash
-        const hash = window.location.hash;
+        // Only run once
+        if (!window.hashProcessed) {
+            window.hashProcessed = true;
 
-        // Parse the hash parameters
-        const params = new URLSearchParams(hash.substring(1));
-        const accessToken = params.get('access_token');
-        const type = params.get('type');
+            // Get the URL hash
+            const hash = window.location.hash;
 
-        // If it's a recovery token, send it to Streamlit
-        if (type === 'recovery' && accessToken) {
-            // Store in session storage for Streamlit to read
-            sessionStorage.setItem('recovery_token', accessToken);
+            if (hash) {
+                // Parse the hash parameters
+                const params = new URLSearchParams(hash.substring(1));
+                const accessToken = params.get('access_token');
+                const type = params.get('type');
 
-            // Reload without the hash to clean up URL
-            window.history.replaceState(null, null, window.location.pathname);
+                // If it's a recovery token, convert hash to query params
+                if (type === 'recovery' && accessToken) {
+                    // Build new URL with query params instead of hash
+                    const url = new URL(window.location.href.split('#')[0]);
+                    url.searchParams.set('access_token', accessToken);
+                    url.searchParams.set('type', type);
+
+                    // Redirect to URL with query params (Streamlit can read these)
+                    window.location.href = url.toString();
+                }
+            }
         }
     </script>
     """
 
     # Inject JavaScript
     components.html(js_code, height=0)
-
-    # Check if recovery token exists in session state
-    if 'recovery_token_extracted' not in st.session_state:
-        st.session_state.recovery_token_extracted = False
-        # On first load, the JS hasn't run yet, so rerun after a moment
-        if not st.session_state.recovery_token_extracted:
-            st.session_state.recovery_token_extracted = True
-            st.rerun()
-
-    # Try to get from query params as fallback (Supabase might add it there too)
-    query_params = st.query_params
-    if 'access_token' in query_params and query_params.get('type') == 'recovery':
-        return query_params['access_token']
 
     return None
 
@@ -120,9 +121,8 @@ def handle_password_reset(recovery_token: str, new_password: str):
             st.success("✅ Password reset successful! You can now login with your new password.")
             st.info("Click below to go to login page")
             if st.button("Go to Login", use_container_width=True, type="primary"):
-                # Clear the recovery token from session
-                if 'recovery_token_extracted' in st.session_state:
-                    del st.session_state.recovery_token_extracted
+                # Clear query parameters to return to clean login page
+                st.query_params.clear()
                 st.rerun()
         else:
             st.error(f"❌ {message}")
