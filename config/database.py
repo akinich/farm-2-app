@@ -117,8 +117,13 @@ class Database:
 class UserDB:
     """
     User-related database operations
-    
-    VERSION: 1.2.0 - Fixed user management with proper Supabase Auth integration
+
+    VERSION: 1.3.0 - Fixed get_all_users to use user_details view
+    CHANGES:
+    - get_all_users() now uses user_details view instead of auth admin API
+    - Fixes "Unknown" email display issue
+    - Much faster query (no per-user API calls)
+    - More reliable (doesn't depend on auth API permissions)
     """
     
     @staticmethod
@@ -212,43 +217,36 @@ class UserDB:
     def get_all_users() -> List[Dict]:
         """
         Get all users with their profiles and roles
-        
+
         Returns:
             List of user dictionaries with profile and role info
         """
         try:
             db = Database.get_client()
-            
-            # Join user_profiles with roles
-            response = db.table('user_profiles') \
+
+            # Use user_details view which includes email from auth.users
+            response = db.table('user_details') \
                 .select('*, roles(role_name)') \
                 .execute()
-            
+
             if response.data:
                 users = []
-                for profile in response.data:
-                    # Get email from auth.users
-                    try:
-                        user_response = db.auth.admin.get_user_by_id(profile['id'])
-                        email = user_response.user.email if user_response.user else 'Unknown'
-                    except:
-                        email = 'Unknown'
-                    
+                for user_detail in response.data:
                     users.append({
-                        'id': profile['id'],
-                        'email': email,
-                        'full_name': profile.get('full_name'),
-                        'role_id': profile.get('role_id'),
-                        'role_name': profile['roles']['role_name'] if profile.get('roles') else 'Unknown',
-                        'is_active': profile.get('is_active', True),
-                        'created_at': profile.get('created_at'),
-                        'updated_at': profile.get('updated_at')
+                        'id': user_detail['id'],
+                        'email': user_detail.get('email', 'Unknown'),
+                        'full_name': user_detail.get('full_name'),
+                        'role_id': user_detail.get('role_id'),
+                        'role_name': user_detail['roles']['role_name'] if user_detail.get('roles') else 'Unknown',
+                        'is_active': user_detail.get('is_active', True),
+                        'created_at': user_detail.get('created_at'),
+                        'updated_at': user_detail.get('updated_at')
                     })
-                
+
                 return users
-            
+
             return []
-            
+
         except Exception as e:
             st.error(f"Error fetching users: {str(e)}")
             return []
