@@ -1,8 +1,26 @@
 """
-Inventory Database Operations V2.1.0
-Added missing methods for inventory.py v2.1.0 compatibility
+Inventory Database Operations V2.1.2
+Added comprehensive category management functionality
 
 VERSION HISTORY:
+2.1.2 - Added category management methods - 10/11/25
+      ADDITIONS:
+      - add_category() - Create new categories with description
+      - update_category() - Update category name and description
+      - delete_category() - Delete categories (only if not used by items)
+      FEATURES:
+      - Validates category usage before deletion
+      - Prevents deleting categories in use by items
+
+2.1.1 - Fixed category foreign key constraint violations - 10/11/25
+      ADDITIONS:
+      - ensure_category_exists() - Auto-create categories in inventory_categories table
+      CHANGES:
+      - add_master_item() - Now ensures category exists before insert
+      - update_master_item() - Now validates category exists before update
+      FIXES:
+      - Resolved "item_master_category_fkey" foreign key constraint errors
+
 2.1.0 - Added missing helper methods for UI compatibility - 10/11/25
       ADDITIONS:
       - get_inventory_summary() - Dashboard summary statistics
@@ -109,6 +127,44 @@ class InventoryDB:
             return []
     
     @staticmethod
+    def ensure_category_exists(category_name: str) -> bool:
+        """
+        Ensure a category exists in inventory_categories table.
+        Creates it if it doesn't exist.
+
+        Args:
+            category_name: Name of the category to ensure exists
+
+        Returns:
+            bool: True if category exists or was created successfully
+        """
+        try:
+            db = Database.get_client()
+
+            # Check if category already exists
+            existing = db.table('inventory_categories') \
+                .select('category_name') \
+                .eq('category_name', category_name) \
+                .execute()
+
+            if existing.data:
+                return True
+
+            # Create new category
+            db.table('inventory_categories').insert({
+                'category_name': category_name
+            }).execute()
+
+            return True
+
+        except Exception as e:
+            # If it's a duplicate key error, category exists - that's fine
+            if '23505' in str(e) or 'duplicate key' in str(e).lower():
+                return True
+            st.error(f"Error ensuring category exists: {str(e)}")
+            return False
+
+    @staticmethod
     def add_master_item(item_data: Dict = None, user_id: str = None, **kwargs) -> bool:
         """
         Add new item to master list (admin only)
@@ -116,20 +172,26 @@ class InventoryDB:
         """
         try:
             db = Database.get_client()
-            
+
             # Handle both calling styles
             if item_data is None:
                 item_data = kwargs
-            
+
             item_data['created_by'] = user_id or kwargs.get('username')
             item_data['current_qty'] = 0  # Always starts at 0
-            
+
             # Remove username if present (not a database column)
             item_data.pop('username', None)
-            
+
+            # Ensure category exists before inserting
+            if 'category' in item_data and item_data['category']:
+                if not InventoryDB.ensure_category_exists(item_data['category']):
+                    st.error("Failed to create category. Please try again.")
+                    return False
+
             db.table('item_master').insert(item_data).execute()
             return True
-        
+
         except Exception as e:
             st.error(f"Error adding master item: {str(e)}")
             return False
@@ -142,25 +204,31 @@ class InventoryDB:
         """
         try:
             db = Database.get_client()
-            
+
             # Handle different parameter names
             item_id = item_id or item_master_id
             if updates is None:
                 updates = kwargs
-            
+
             updates['updated_at'] = datetime.now().isoformat()
-            
+
             # Remove non-database fields
             updates.pop('username', None)
             updates.pop('item_master_id', None)
-            
+
+            # Ensure category exists if being updated
+            if 'category' in updates and updates['category']:
+                if not InventoryDB.ensure_category_exists(updates['category']):
+                    st.error("Failed to create category. Please try again.")
+                    return False
+
             db.table('item_master') \
                 .update(updates) \
                 .eq('id', item_id) \
                 .execute()
-            
+
             return True
-        
+
         except Exception as e:
             st.error(f"Error updating master item: {str(e)}")
             return False
@@ -576,22 +644,136 @@ class InventoryDB:
         """
         try:
             db = Database.get_client()
-            
+
             # Get unique categories from item_master
             response = db.table('item_master') \
                 .select('category') \
                 .execute()
-            
+
             if response.data:
                 categories = list(set([item['category'] for item in response.data if item.get('category')]))
                 return sorted(categories)
-            
+
             return []
-        
+
         except Exception as e:
             st.error(f"Error fetching categories: {str(e)}")
             return []
-    
+
+    @staticmethod
+    def add_category(category_name: str, description: str = None, user_id: str = None) -> bool:
+        """
+        Add a new category to inventory_categories
+
+        Args:
+            category_name: Name of the category
+            description: Optional description
+            user_id: User creating the category
+
+        Returns:
+            bool: True if added successfully
+        """
+        try:
+            db = Database.get_client()
+
+            category_data = {
+                'category_name': category_name.strip(),
+                'description': description.strip() if description else None,
+                'created_by': user_id
+            }
+
+            db.table('inventory_categories').insert(category_data).execute()
+            return True
+
+        except Exception as e:
+            st.error(f"Error adding category: {str(e)}")
+            return False
+
+    @staticmethod
+    def update_category(category_id: int, category_name: str = None, description: str = None) -> bool:
+        """
+        Update an existing category
+
+        Args:
+            category_id: ID of category to update
+            category_name: New name (optional)
+            description: New description (optional)
+
+        Returns:
+            bool: True if updated successfully
+        """
+        try:
+            db = Database.get_client()
+
+            updates = {
+                'updated_at': datetime.now().isoformat()
+            }
+
+            if category_name is not None:
+                updates['category_name'] = category_name.strip()
+            if description is not None:
+                updates['description'] = description.strip() if description else None
+
+            db.table('inventory_categories') \
+                .update(updates) \
+                .eq('id', category_id) \
+                .execute()
+
+            return True
+
+        except Exception as e:
+            st.error(f"Error updating category: {str(e)}")
+            return False
+
+    @staticmethod
+    def delete_category(category_id: int) -> bool:
+        """
+        Delete a category (only if not used by any items)
+
+        Args:
+            category_id: ID of category to delete
+
+        Returns:
+            bool: True if deleted successfully
+        """
+        try:
+            db = Database.get_client()
+
+            # First check if category is used by any items
+            category_response = db.table('inventory_categories') \
+                .select('category_name') \
+                .eq('id', category_id) \
+                .single() \
+                .execute()
+
+            if not category_response.data:
+                st.error("Category not found")
+                return False
+
+            category_name = category_response.data['category_name']
+
+            # Check if any items use this category
+            items_response = db.table('item_master') \
+                .select('id') \
+                .eq('category', category_name) \
+                .execute()
+
+            if items_response.data and len(items_response.data) > 0:
+                st.error(f"Cannot delete category '{category_name}' - it is used by {len(items_response.data)} item(s)")
+                return False
+
+            # Safe to delete
+            db.table('inventory_categories') \
+                .delete() \
+                .eq('id', category_id) \
+                .execute()
+
+            return True
+
+        except Exception as e:
+            st.error(f"Error deleting category: {str(e)}")
+            return False
+
     @staticmethod
     def get_suppliers(active_only: bool = True) -> List[Dict]:
         """Get all suppliers"""
