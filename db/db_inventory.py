@@ -7,6 +7,7 @@ VERSION HISTORY:
       CHANGES:
       - get_pos() - Removed direct item_master join (no FK relationship exists)
       - get_pos() - Now fetches items via purchase_order_items table
+      - get_pos() - Changed user_profiles to user_details (correct table name)
       - create_purchase_order() - Removed total_cost from insert (generated column)
       FEATURES:
       - PO list now correctly fetches items through proper relationship chain
@@ -14,6 +15,7 @@ VERSION HISTORY:
       - Calculates totals dynamically from purchase_order_items
       FIXES:
       - Fixed "Could not find a relationship between purchase_orders and item_master" error
+      - Fixed "Could not find a relationship between purchase_orders and user_profiles" error
       - Fixed "cannot insert a non-DEFAULT value into column total_cost" error
       - PO creation now works correctly without trying to insert generated columns
 
@@ -1213,7 +1215,7 @@ class InventoryDB:
             since_date = datetime.now() - timedelta(days=days)
 
             query = db.table('purchase_orders') \
-                .select('*, suppliers(supplier_name), user_profiles!purchase_orders_created_by_fkey(full_name)') \
+                .select('*, suppliers(supplier_name), user_details!purchase_orders_created_by_fkey(full_name)') \
                 .gte('po_date', since_date.date().isoformat()) \
                 .order('po_date', desc=True)
 
@@ -1227,8 +1229,8 @@ class InventoryDB:
             for po in pos:
                 if po.get('suppliers'):
                     po['supplier_name'] = po['suppliers']['supplier_name']
-                if po.get('user_profiles'):
-                    po['created_by'] = po['user_profiles']['full_name']
+                if po.get('user_details'):
+                    po['created_by'] = po['user_details']['full_name']
                 else:
                     # Fallback if profile not found
                     po['created_by'] = po.get('created_by', 'Unknown')
