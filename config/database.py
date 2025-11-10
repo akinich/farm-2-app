@@ -3,6 +3,17 @@ Database configuration and connection utilities for Supabase
 Farm Management System
 
 VERSION HISTORY:
+1.4.0 - Enhanced ActivityLogger with email resolution - 10/11/25
+      ADDITIONS:
+      - Optional user_email parameter to ActivityLogger.log()
+      - Automatic email resolution from session state
+      - Fallback to auth API if session unavailable
+      IMPROVEMENTS:
+      - Activity logs now show actual user email instead of "Unknown"
+      - Better error handling with detailed error messages
+      - Input validation for user_id and action_type
+      - More verbose debugging output
+
 1.3.0 - Added improved BioflocDB class with validation, caching, and views - 08/11/25
       ADDITIONS:
       - BioflocDB class with full CRUD operations
@@ -702,8 +713,20 @@ class ActivityLogger:
     
     @staticmethod
     def log(user_id: str, action_type: str, module_key: str = None,
-            description: str = None, metadata: Dict = None, success: bool = True) -> bool:
-        """Log user activity"""
+            description: str = None, metadata: Dict = None, success: bool = True,
+            user_email: str = None) -> bool:
+        """
+        Log user activity
+
+        Args:
+            user_id: User's UUID
+            action_type: Type of action (e.g., 'login', 'add_item')
+            module_key: Module identifier
+            description: Human-readable description
+            metadata: Additional data as dict
+            success: Whether action succeeded
+            user_email: Optional user email (if not provided, will try to fetch from session or auth)
+        """
         try:
             # Validate inputs
             if not user_id:
@@ -716,15 +739,27 @@ class ActivityLogger:
 
             db = Database.get_client()
 
-            # Get user email - with better error handling
-            user_email = 'Unknown'
-            try:
-                user_response = db.auth.admin.get_user_by_id(user_id)
-                if user_response and user_response.user and user_response.user.email:
-                    user_email = user_response.user.email
-            except Exception as email_error:
-                # If getting email fails, continue with 'Unknown'
-                print(f"Info: Could not fetch user email for {user_id}: {str(email_error)}")
+            # Get user email - use provided or try to fetch
+            if not user_email:
+                user_email = 'Unknown'
+
+                # Try to get from Streamlit session state first
+                try:
+                    import streamlit as st
+                    if 'user' in st.session_state and st.session_state.user:
+                        if 'email' in st.session_state.user:
+                            user_email = st.session_state.user['email']
+                except:
+                    pass
+
+                # If still unknown, try auth API (this might fail)
+                if user_email == 'Unknown':
+                    try:
+                        user_response = db.auth.admin.get_user_by_id(user_id)
+                        if user_response and user_response.user and user_response.user.email:
+                            user_email = user_response.user.email
+                    except Exception as email_error:
+                        print(f"Info: Could not fetch user email for {user_id}: {str(email_error)}")
 
             log_data = {
                 'user_id': str(user_id),  # Ensure it's a string
