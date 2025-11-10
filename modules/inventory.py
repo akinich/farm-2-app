@@ -3,6 +3,25 @@ Inventory Management Module
 Complete inventory system with batch tracking, FIFO, expiry management, and cost tracking
 
 VERSION HISTORY:
+2.1.8 - Reorganized UI and added supplier edit/delete - 10/11/25
+      UI IMPROVEMENTS:
+      - Split tabs into two rows: User Operations and Admin Configuration
+      - Cleaner organization with logical grouping
+      - First row: 7 operational tabs for all users
+      - Second row: 4 configuration tabs for admins only
+      ADDITIONS:
+      - show_edit_supplier() - Edit/delete supplier functionality
+      - Supplier edit sub-tab with full CRUD operations
+      - Active/inactive status toggle for suppliers
+      - Delete protection for suppliers in use
+      CHANGES:
+      - Reorganized tab structure from single row to two rows
+      - Updated supplier tab from 2 to 3 sub-tabs (View/Add/Edit)
+      - Added descriptive section headers
+      FEATURES:
+      - Activity logging for supplier operations
+      - Usage statistics for suppliers
+
 2.1.7 - Added Categories Management Tab - 10/11/25
       ADDITIONS:
       - New "Categories" tab for admins (11th tab)
@@ -103,8 +122,9 @@ VERSION HISTORY:
       - Analytics and reports (admin only)
 
 ACCESS CONTROL:
-- Admin: Full access to all 11 tabs including master list, categories, suppliers, analytics
-- User: Access to 7 operational tabs (no cost data, no master list editing)
+- All Users: 7 operational tabs (Dashboard, Current Stock, Add Stock, Adjustments, POs, Alerts, History)
+- Admin: Additional 4 configuration tabs (Item Master, Categories, Suppliers, Analytics)
+- Two-row layout: User Operations (top) + Admin Configuration (bottom for admins only)
 """
 
 import streamlit as st
@@ -157,69 +177,52 @@ def show():
         st.session_state.inv_refresh_trigger = 0
     
     # Create tabs based on user role
+    # User tabs (available to all)
+    st.markdown("### 👤 User Operations")
+    user_tabs = st.tabs([
+        "📊 Dashboard",
+        "📦 Current Stock",
+        "➕ Add Stock",
+        "🔄 Adjustments",
+        "🛒 Purchase Orders",
+        "🔔 Alerts",
+        "📜 History"
+    ])
+
+    with user_tabs[0]:
+        show_dashboard_tab(username, is_admin)
+    with user_tabs[1]:
+        show_current_stock_tab(username, is_admin)
+    with user_tabs[2]:
+        show_add_stock_tab(username)
+    with user_tabs[3]:
+        show_adjustments_tab(username)
+    with user_tabs[4]:
+        show_purchase_orders_tab(username, is_admin)
+    with user_tabs[5]:
+        show_alerts_tab(username)
+    with user_tabs[6]:
+        show_history_tab(username, is_admin)
+
+    # Admin-only tabs (second row)
     if is_admin:
-        tabs = st.tabs([
-            "📊 Dashboard",
-            "📦 Current Stock",
-            "➕ Add Stock",
-            "🔄 Adjustments",
-            "🛒 Purchase Orders",
-            "🔔 Alerts",
-            "📜 History",
+        st.markdown("---")
+        st.markdown("### 🔐 Admin Configuration")
+        admin_tabs = st.tabs([
             "📋 Item Master List",
             "🏷️ Categories",
             "👥 Suppliers",
             "📈 Analytics"
         ])
 
-        with tabs[0]:
-            show_dashboard_tab(username, is_admin)
-        with tabs[1]:
-            show_current_stock_tab(username, is_admin)
-        with tabs[2]:
-            show_add_stock_tab(username)
-        with tabs[3]:
-            show_adjustments_tab(username)
-        with tabs[4]:
-            show_purchase_orders_tab(username, is_admin)
-        with tabs[5]:
-            show_alerts_tab(username)
-        with tabs[6]:
-            show_history_tab(username, is_admin)
-        with tabs[7]:
+        with admin_tabs[0]:
             show_item_master_tab(username)
-        with tabs[8]:
+        with admin_tabs[1]:
             show_categories_tab(username)
-        with tabs[9]:
+        with admin_tabs[2]:
             show_suppliers_tab(username)
-        with tabs[10]:
+        with admin_tabs[3]:
             show_analytics_tab(username)
-    else:
-        # Regular users - 7 tabs only
-        tabs = st.tabs([
-            "📊 Dashboard",
-            "📦 Current Stock",
-            "➕ Add Stock",
-            "🔄 Adjustments",
-            "🛒 Purchase Orders",
-            "🔔 Alerts",
-            "📜 History"
-        ])
-        
-        with tabs[0]:
-            show_dashboard_tab(username, is_admin)
-        with tabs[1]:
-            show_current_stock_tab(username, is_admin)
-        with tabs[2]:
-            show_add_stock_tab(username)
-        with tabs[3]:
-            show_adjustments_tab(username)
-        with tabs[4]:
-            show_purchase_orders_tab(username, is_admin)
-        with tabs[5]:
-            show_alerts_tab(username)
-        with tabs[6]:
-            show_history_tab(username, is_admin)
 
 
 # =====================================================
@@ -1642,16 +1645,21 @@ def show_edit_master_item(username: str):
 
 def show_suppliers_tab(username: str):
     """Manage suppliers (Admin only)"""
-    
+
     st.markdown("### 👥 Suppliers")
-    
-    subtabs = st.tabs(["📋 All Suppliers", "➕ Add Supplier"])
-    
+    st.caption("Manage suppliers for inventory items")
+    st.markdown("---")
+
+    subtabs = st.tabs(["📋 View Suppliers", "➕ Add Supplier", "✏️ Edit Supplier"])
+
     with subtabs[0]:
         show_all_suppliers()
-    
+
     with subtabs[1]:
         show_add_supplier(username)
+
+    with subtabs[2]:
+        show_edit_supplier(username)
 
 
 def show_all_suppliers():
@@ -1741,6 +1749,159 @@ def show_add_supplier(username: str):
                     st.rerun()
                 else:
                     st.error("❌ Failed to add supplier")
+
+
+def show_edit_supplier(username: str):
+    """Edit or delete existing supplier"""
+
+    st.markdown("#### ✏️ Edit Supplier")
+
+    suppliers = InventoryDB.get_all_suppliers(active_only=False)
+
+    if not suppliers:
+        st.warning("No suppliers found. Add a supplier first.")
+        return
+
+    # Supplier selection
+    supplier_options = {f"{s['supplier_name']} ({s.get('phone', 'N/A')})": s for s in suppliers}
+    selected_key = st.selectbox(
+        "Select Supplier",
+        options=list(supplier_options.keys()),
+        key="edit_supplier_select"
+    )
+    selected_supplier = supplier_options[selected_key]
+
+    st.markdown("---")
+
+    # Get item count for this supplier
+    all_items = InventoryDB.get_all_master_items(active_only=False)
+    item_count = 0
+    if all_items:
+        items_df = pd.DataFrame(all_items)
+        if 'default_supplier_id' in items_df.columns:
+            item_count = len(items_df[items_df['default_supplier_id'] == selected_supplier['id']])
+
+    if item_count > 0:
+        st.info(f"ℹ️ This supplier is set as default for {item_count} item(s)")
+
+    with st.form("edit_supplier_form"):
+        col1, col2 = st.columns(2)
+
+        with col1:
+            supplier_name = st.text_input(
+                "Supplier Name *",
+                value=selected_supplier.get('supplier_name', ''),
+                placeholder="e.g., ABC Suppliers"
+            )
+            contact_person = st.text_input(
+                "Contact Person",
+                value=selected_supplier.get('contact_person', '') or '',
+                placeholder="e.g., John Doe"
+            )
+            phone = st.text_input(
+                "Phone",
+                value=selected_supplier.get('phone', '') or '',
+                placeholder="e.g., +91-9876543210"
+            )
+
+        with col2:
+            email = st.text_input(
+                "Email",
+                value=selected_supplier.get('email', '') or '',
+                placeholder="e.g., contact@supplier.com"
+            )
+            address = st.text_area(
+                "Address",
+                value=selected_supplier.get('address', '') or '',
+                height=80
+            )
+            notes = st.text_area(
+                "Notes",
+                value=selected_supplier.get('notes', '') or '',
+                height=80
+            )
+
+        # Status toggle
+        is_active = st.checkbox(
+            "Active Supplier",
+            value=selected_supplier.get('is_active', True),
+            key="edit_supplier_is_active"
+        )
+
+        st.markdown("---")
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+            update_submitted = st.form_submit_button("💾 Update Supplier", type="primary", use_container_width=True)
+
+        with col2:
+            delete_submitted = st.form_submit_button("🗑️ Delete Supplier", type="secondary", use_container_width=True)
+
+        if update_submitted:
+            # Validation
+            if not supplier_name or len(supplier_name.strip()) < 3:
+                st.error("❌ Supplier name is required (minimum 3 characters)")
+                return
+
+            # Update supplier
+            updates = {
+                'supplier_name': supplier_name.strip(),
+                'contact_person': contact_person.strip() if contact_person else None,
+                'phone': phone.strip() if phone else None,
+                'email': email.strip() if email else None,
+                'address': address.strip() if address else None,
+                'notes': notes.strip() if notes else None,
+                'is_active': is_active
+            }
+
+            success = InventoryDB.update_supplier(
+                supplier_id=selected_supplier['id'],
+                updates=updates
+            )
+
+            if success:
+                st.success(f"✅ Supplier '{supplier_name}' updated successfully!")
+
+                # Log activity
+                if 'user' in st.session_state and st.session_state.user:
+                    ActivityLogger.log(
+                        user_id=st.session_state.user['id'],
+                        action_type='update_supplier',
+                        module_key='inventory_management',
+                        description=f"Updated supplier: {selected_supplier['supplier_name']} → {supplier_name}",
+                        metadata={
+                            'supplier_id': selected_supplier['id'],
+                            'old_name': selected_supplier['supplier_name'],
+                            'new_name': supplier_name
+                        }
+                    )
+
+                time.sleep(1)
+                st.rerun()
+            else:
+                st.error("❌ Failed to update supplier")
+
+        if delete_submitted:
+            # Attempt to delete
+            success = InventoryDB.delete_supplier(selected_supplier['id'])
+
+            if success:
+                st.success(f"✅ Supplier '{selected_supplier['supplier_name']}' deleted successfully!")
+
+                # Log activity
+                if 'user' in st.session_state and st.session_state.user:
+                    ActivityLogger.log(
+                        user_id=st.session_state.user['id'],
+                        action_type='delete_supplier',
+                        module_key='inventory_management',
+                        description=f"Deleted supplier: {selected_supplier['supplier_name']}",
+                        metadata={'supplier_name': selected_supplier['supplier_name']}
+                    )
+
+                time.sleep(1)
+                st.rerun()
+            # Error message is already shown by delete_supplier method
 
 
 # =====================================================
