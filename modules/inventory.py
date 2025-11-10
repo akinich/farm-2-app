@@ -7,8 +7,18 @@ VERSION HISTORY:
       FIXES:
       - Safely rename master list columns when optional fields are missing
       - Prevent pandas length mismatch errors in Item Master tab
+      - Ensure unique keys on selectboxes to avoid duplicate Streamlit IDs
       CHANGES:
       - show_all_master_items
+      - show_all_suppliers
+      - show_add_stock_tab
+      - show_adjustments_tab
+      - show_all_purchase_orders
+      - show_create_purchase_order
+      - show_history_tab
+      - show_add_master_item
+      - show_edit_master_item
+      - show_cost_analysis
 
 2.1.2 - Resolved alerts column mismatch - 10/11/25
       FIXES:
@@ -458,7 +468,8 @@ def show_add_stock_tab(username: str):
             selected_item_key = st.selectbox(
                 "Select Item *",
                 options=list(item_options.keys()),
-                help="Search and select item from master list"
+                help="Search and select item from master list",
+                key="add_stock_item_select"
             )
             selected_item = item_options[selected_item_key]
             
@@ -508,7 +519,8 @@ def show_add_stock_tab(username: str):
             supplier_name = st.selectbox(
                 "Supplier",
                 options=supplier_options,
-                help="Select supplier (optional)"
+                help="Select supplier (optional)",
+                key="add_stock_supplier_select"
             )
             
             if supplier_name == "Select Supplier":
@@ -622,7 +634,8 @@ def show_adjustments_tab(username: str):
             
             selected_item_key = st.selectbox(
                 "Select Item *",
-                options=list(item_options.keys())
+                options=list(item_options.keys()),
+                key="adjustment_item_select"
             )
             selected_item = item_options[selected_item_key]
             
@@ -630,7 +643,8 @@ def show_adjustments_tab(username: str):
             adjustment_type = st.selectbox(
                 "Adjustment Type *",
                 options=["damage", "wastage", "theft", "correction", "other"],
-                format_func=lambda x: x.title()
+                format_func=lambda x: x.title(),
+                key="adjustment_type_select"
             )
             
             # Quantity
@@ -771,7 +785,11 @@ def show_all_purchase_orders(username: str, is_admin: bool):
     col1, col2, col3 = st.columns(3)
     
     with col1:
-        status_filter = st.selectbox("Status", ["All", "pending", "approved", "ordered", "received", "cancelled"])
+        status_filter = st.selectbox(
+            "Status",
+            ["All", "pending", "approved", "ordered", "received", "cancelled"],
+            key="po_status_filter_select"
+        )
     
     with col2:
         days_back = st.number_input("Days to show", min_value=7, max_value=365, value=30)
@@ -856,12 +874,20 @@ def show_create_purchase_order(username: str):
         with col1:
             # Item
             item_options = {item['item_name']: item for item in master_items}
-            selected_item_name = st.selectbox("Select Item *", options=list(item_options.keys()))
+            selected_item_name = st.selectbox(
+                "Select Item *",
+                options=list(item_options.keys()),
+                key="create_po_item_select"
+            )
             selected_item = item_options[selected_item_name]
             
             # Supplier
             supplier_options = ["Select Supplier"] + [s['supplier_name'] for s in suppliers]
-            supplier_name = st.selectbox("Supplier *", options=supplier_options)
+            supplier_name = st.selectbox(
+                "Supplier *",
+                options=supplier_options,
+                key="create_po_supplier_select"
+            )
             
             # Quantity
             quantity = st.number_input(
@@ -1077,12 +1103,20 @@ def show_history_tab(username: str, is_admin: bool):
     
     with col2:
         transaction_types = ["All", "stock_in", "stock_out", "adjustment"]
-        trans_filter = st.selectbox("Type", options=transaction_types)
+        trans_filter = st.selectbox(
+            "Type",
+            options=transaction_types,
+            key="history_type_filter_select"
+        )
     
     with col3:
         master_items = InventoryDB.get_all_master_items()
         item_names = ["All"] + [item['item_name'] for item in master_items]
-        item_filter = st.selectbox("Item", options=item_names)
+        item_filter = st.selectbox(
+            "Item",
+            options=item_names,
+            key="history_item_filter_select"
+        )
     
     with col4:
         if st.button("🔄 Refresh", use_container_width=True, key="refresh_history"):
@@ -1173,11 +1207,19 @@ def show_all_master_items():
     col1, col2, col3 = st.columns(3)
     
     with col1:
-        status_filter = st.selectbox("Status", ["All", "Active", "Inactive"])
+        status_filter = st.selectbox(
+            "Status",
+            ["All", "Active", "Inactive"],
+            key="master_status_filter_select"
+        )
     
     with col2:
         categories = InventoryDB.get_all_categories()
-        category_filter = st.selectbox("Category", ["All"] + categories)
+        category_filter = st.selectbox(
+            "Category",
+            ["All"] + categories,
+            key="master_category_filter_select"
+        )
     
     with col3:
         if st.button("🔄 Refresh", use_container_width=True, key="refresh_master_items"):
@@ -1249,14 +1291,22 @@ def show_add_master_item(username: str):
             sku = st.text_input("SKU *", placeholder="e.g., FF-3MM-28P")
             category = st.text_input("Category *", placeholder="e.g., Fish Feed")
             brand = st.text_input("Brand/Manufacturer", placeholder="e.g., Growel")
-            unit = st.selectbox("Unit *", options=["kg", "g", "liter", "ml", "pieces", "bags", "boxes"])
+            unit = st.selectbox(
+                "Unit *",
+                options=["kg", "g", "liter", "ml", "pieces", "bags", "boxes"],
+                key="add_master_unit_select"
+            )
         
         with col2:
             reorder_level = st.number_input("Reorder Level *", min_value=0.0, step=0.01, format="%.2f")
             
             suppliers = InventoryDB.get_all_suppliers(active_only=True)
             supplier_options = ["None"] + [s['supplier_name'] for s in suppliers]
-            default_supplier = st.selectbox("Default Supplier", options=supplier_options)
+            default_supplier = st.selectbox(
+                "Default Supplier",
+                options=supplier_options,
+                key="add_master_default_supplier_select"
+            )
             
             specifications = st.text_area("Specifications", height=80)
             notes = st.text_area("Notes", height=80)
@@ -1327,7 +1377,11 @@ def show_edit_master_item(username: str):
     
     # Item selection
     item_options = {f"{item['item_name']} ({item.get('sku', 'N/A')})": item for item in items}
-    selected_key = st.selectbox("Select Item", options=list(item_options.keys()))
+    selected_key = st.selectbox(
+        "Select Item",
+        options=list(item_options.keys()),
+        key="edit_master_item_select"
+    )
     selected_item = item_options[selected_key]
     
     st.markdown("---")
@@ -1344,7 +1398,12 @@ def show_edit_master_item(username: str):
             units = ["kg", "g", "liter", "ml", "pieces", "bags", "boxes"]
             current_unit = selected_item.get('unit', 'kg')
             unit_index = units.index(current_unit) if current_unit in units else 0
-            unit = st.selectbox("Unit *", options=units, index=unit_index)
+            unit = st.selectbox(
+                "Unit *",
+                options=units,
+                index=unit_index,
+                key="edit_master_unit_select"
+            )
         
         with col2:
             reorder_level = st.number_input("Reorder Level *", value=float(selected_item.get('reorder_level', 0)))
@@ -1353,7 +1412,12 @@ def show_edit_master_item(username: str):
             supplier_options = ["None"] + [s['supplier_name'] for s in suppliers]
             current_supplier = selected_item.get('default_supplier', 'None') or 'None'
             supplier_index = supplier_options.index(current_supplier) if current_supplier in supplier_options else 0
-            default_supplier = st.selectbox("Default Supplier", options=supplier_options, index=supplier_index)
+            default_supplier = st.selectbox(
+                "Default Supplier",
+                options=supplier_options,
+                index=supplier_index,
+                key="edit_master_default_supplier_select"
+            )
             
             is_active = st.checkbox("Active", value=selected_item.get('is_active', True))
             
@@ -1423,7 +1487,11 @@ def show_all_suppliers():
     
     st.markdown("#### 📋 All Suppliers")
     
-    status_filter = st.selectbox("Status", ["All", "Active", "Inactive"])
+    status_filter = st.selectbox(
+        "Status",
+        ["All", "Active", "Inactive"],
+        key="supplier_status_filter_select"
+    )
     
     with st.spinner("Loading suppliers..."):
         if status_filter == "Active":
@@ -1605,7 +1673,11 @@ def show_cost_analysis():
     col1, col2 = st.columns(2)
     
     with col1:
-        analysis_period = st.selectbox("Period", ["Last 7 Days", "Last 30 Days", "Last 90 Days", "Custom"])
+        analysis_period = st.selectbox(
+            "Period",
+            ["Last 7 Days", "Last 30 Days", "Last 90 Days", "Custom"],
+            key="cost_analysis_period_select"
+        )
     
     with col2:
         if analysis_period == "Custom":
