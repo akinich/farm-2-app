@@ -1,8 +1,15 @@
 """
-Inventory Database Operations V2.1.2
-Added comprehensive category management functionality
+Inventory Database Operations V2.1.3
+Added supplier delete functionality
 
 VERSION HISTORY:
+2.1.3 - Added supplier deletion with validation - 10/11/25
+      ADDITIONS:
+      - delete_supplier() - Delete suppliers (only if not used as default by items)
+      FEATURES:
+      - Validates supplier usage before deletion
+      - Prevents deleting suppliers that are set as default for items
+
 2.1.2 - Added category management methods - 10/11/25
       ADDITIONS:
       - add_category() - Create new categories with description
@@ -825,18 +832,54 @@ class InventoryDB:
         """Update supplier info"""
         try:
             db = Database.get_client()
-            
+
             db.table('suppliers') \
                 .update(updates) \
                 .eq('id', supplier_id) \
                 .execute()
-            
+
             return True
-        
+
         except Exception as e:
             st.error(f"Error updating supplier: {str(e)}")
             return False
-    
+
+    @staticmethod
+    def delete_supplier(supplier_id: int) -> bool:
+        """
+        Delete a supplier (only if not used as default supplier by any items)
+
+        Args:
+            supplier_id: ID of supplier to delete
+
+        Returns:
+            bool: True if deleted successfully
+        """
+        try:
+            db = Database.get_client()
+
+            # Check if supplier is used as default supplier by any items
+            items_response = db.table('item_master') \
+                .select('id') \
+                .eq('default_supplier_id', supplier_id) \
+                .execute()
+
+            if items_response.data and len(items_response.data) > 0:
+                st.error(f"Cannot delete supplier - it is set as default supplier for {len(items_response.data)} item(s)")
+                return False
+
+            # Safe to delete
+            db.table('suppliers') \
+                .delete() \
+                .eq('id', supplier_id) \
+                .execute()
+
+            return True
+
+        except Exception as e:
+            st.error(f"Error deleting supplier: {str(e)}")
+            return False
+
     # =====================================================
     # ALERTS
     # =====================================================
