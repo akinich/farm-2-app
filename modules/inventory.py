@@ -3,6 +3,17 @@ Inventory Management Module
 Complete inventory system with batch tracking, FIFO, expiry management, and cost tracking
 
 VERSION HISTORY:
+2.1.9 - Enhanced history tab and removed unit cost from current stock - 10/11/25
+      ADDITIONS:
+      - Added 'Unit' column to transaction history tab
+      - Added 'Total Cost' column to transaction history (calculated from unit_cost * quantity)
+      CHANGES:
+      - Removed 'Unit Cost' column from Current Stock tab (cleaner view)
+      - Updated history column order for better readability
+      IMPROVEMENTS:
+      - Better cost visibility in history with both unit and total costs
+      - Cleaner current stock view without pricing details
+
 2.1.8 - Reorganized UI and added supplier edit/delete - 10/11/25
       UI IMPROVEMENTS:
       - Split tabs into two rows: User Operations and Admin Configuration
@@ -405,34 +416,24 @@ def show_current_stock_tab(username: str, is_admin: bool):
     # Convert to DataFrame
     df = pd.DataFrame(batches)
     
-    # Select columns based on role
-    if is_admin:
-        display_cols = [
-            'item_name', 'batch_number', 'purchase_date', 'supplier_name',
-            'quantity', 'remaining_qty', 'unit', 'unit_cost', 'expiry_date', 'status'
-        ]
-    else:
-        # Hide unit_cost for regular users
-        display_cols = [
-            'item_name', 'batch_number', 'purchase_date', 'supplier_name',
-            'quantity', 'remaining_qty', 'unit', 'expiry_date', 'status'
-        ]
-    
+    # Select columns - removed unit_cost from display
+    display_cols = [
+        'item_name', 'batch_number', 'purchase_date', 'supplier_name',
+        'quantity', 'remaining_qty', 'unit', 'expiry_date', 'status'
+    ]
+
     # Ensure columns exist
     display_cols = [col for col in display_cols if col in df.columns]
     display_df = df[display_cols].copy()
-    
+
     # Format columns
     if 'purchase_date' in display_df.columns:
         display_df['purchase_date'] = pd.to_datetime(display_df['purchase_date']).dt.strftime('%Y-%m-%d')
-    
+
     if 'expiry_date' in display_df.columns:
         display_df['expiry_date'] = pd.to_datetime(display_df['expiry_date'], errors='coerce').dt.strftime('%Y-%m-%d')
         display_df['expiry_date'] = display_df['expiry_date'].fillna('N/A')
-    
-    if 'unit_cost' in display_df.columns:
-        display_df['unit_cost'] = display_df['unit_cost'].apply(lambda x: f"₹{x:.2f}" if pd.notna(x) else 'N/A')
-    
+
     # Rename columns for display
     column_mapping = {
         'item_name': 'Item Name',
@@ -442,7 +443,6 @@ def show_current_stock_tab(username: str, is_admin: bool):
         'quantity': 'Original Qty',
         'remaining_qty': 'Remaining Qty',
         'unit': 'Unit',
-        'unit_cost': 'Unit Cost',
         'expiry_date': 'Expiry Date',
         'status': 'Status'
     }
@@ -1209,29 +1209,38 @@ def show_history_tab(username: str, is_admin: bool):
     
     # Select columns based on role
     if is_admin:
-        display_cols = ['transaction_date', 'item_name', 'transaction_type', 'quantity', 'batch_number', 'reference', 'unit_cost', 'performed_by']
+        display_cols = ['transaction_date', 'item_name', 'transaction_type', 'quantity', 'unit', 'batch_number', 'reference', 'unit_cost', 'total_cost', 'performed_by']
     else:
-        display_cols = ['transaction_date', 'item_name', 'transaction_type', 'quantity', 'batch_number', 'reference', 'performed_by']
-    
+        display_cols = ['transaction_date', 'item_name', 'transaction_type', 'quantity', 'unit', 'batch_number', 'reference', 'performed_by']
+
     display_cols = [col for col in display_cols if col in df.columns]
     display_df = df[display_cols].copy()
-    
+
+    # Calculate total_cost if not present
+    if 'total_cost' not in display_df.columns and 'unit_cost' in df.columns and 'quantity' in df.columns:
+        display_df['total_cost'] = df['unit_cost'] * df['quantity']
+
     # Format
     if 'transaction_date' in display_df.columns:
         display_df['transaction_date'] = pd.to_datetime(display_df['transaction_date']).dt.strftime('%Y-%m-%d %H:%M')
-    
+
     if 'unit_cost' in display_df.columns:
         display_df['unit_cost'] = display_df['unit_cost'].apply(lambda x: f"₹{x:.2f}" if pd.notna(x) else 'N/A')
-    
+
+    if 'total_cost' in display_df.columns:
+        display_df['total_cost'] = display_df['total_cost'].apply(lambda x: f"₹{x:.2f}" if pd.notna(x) else 'N/A')
+
     # Rename
     column_mapping = {
         'transaction_date': 'Date & Time',
         'item_name': 'Item',
         'transaction_type': 'Type',
         'quantity': 'Quantity',
+        'unit': 'Unit',
         'batch_number': 'Batch',
         'reference': 'Reference',
         'unit_cost': 'Unit Cost',
+        'total_cost': 'Total Cost',
         'performed_by': 'User'
     }
     
