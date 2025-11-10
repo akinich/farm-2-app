@@ -3,6 +3,17 @@ Inventory Management Module
 Complete inventory system with batch tracking, FIFO, expiry management, and cost tracking
 
 VERSION HISTORY:
+2.2.2 - Fixed Excel download and enhanced PO UI - 10/11/25
+      ADDITIONS:
+      - Editable auto-generated PO number field (format: PO-YYYYMMDD-HHMMSS)
+      FIXES:
+      - Fixed Excel download in PO list - now uses direct download button instead of nested button
+      - Excel export now works properly for purchase orders
+      IMPROVEMENTS:
+      - PO number is auto-generated but user can edit it before submission
+      - Download button always visible when POs are displayed
+      - Better UX for Excel export functionality
+
 2.2.1 - Enhanced PO UI with dynamic unit display - 10/11/25
       IMPROVEMENTS:
       - Unit cost label now shows unit dynamically (₹/kg, ₹/g, ₹/L, etc.)
@@ -926,10 +937,22 @@ def show_all_purchase_orders(username: str, is_admin: bool):
     display_df.rename(columns=column_mapping, inplace=True)
     
     st.dataframe(display_df, use_container_width=True, hide_index=True, height=500)
-    
-    # Export
-    if st.button("📥 Export to Excel", use_container_width=True, key="export_pos"):
-        export_to_excel(display_df, "purchase_orders")
+
+    # Export - prepare data for download
+    from io import BytesIO
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+        display_df.to_excel(writer, index=False, sheet_name='Purchase Orders')
+    output.seek(0)
+
+    st.download_button(
+        label="📥 Download Excel",
+        data=output,
+        file_name=f"purchase_orders_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        use_container_width=True,
+        key="download_pos_excel"
+    )
 
 
 def show_create_purchase_order(username: str):
@@ -950,8 +973,17 @@ def show_create_purchase_order(username: str):
         return
     
     with st.form("create_po_form", clear_on_submit=True):
+        # Auto-generate PO number but make it editable
+        default_po_number = f"PO-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+        po_number_input = st.text_input(
+            "PO Number *",
+            value=default_po_number,
+            help="Auto-generated, but you can edit it",
+            key="create_po_number"
+        )
+
         col1, col2 = st.columns(2)
-        
+
         with col1:
             # Item
             item_options = {item['item_name']: item for item in master_items}
@@ -1016,12 +1048,12 @@ def show_create_purchase_order(username: str):
                 st.error("❌ Quantity must be greater than 0")
             elif unit_cost <= 0:
                 st.error("❌ Unit cost must be greater than 0")
+            elif not po_number_input or len(po_number_input.strip()) < 3:
+                st.error("❌ PO number is required")
             else:
                 with st.spinner("Creating purchase order..."):
-                    po_number = f"PO-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
-
                     success = InventoryDB.create_purchase_order(
-                        po_number=po_number,
+                        po_number=po_number_input.strip(),
                         item_master_id=selected_item['id'],
                         supplier_name=supplier_name,
                         quantity=quantity,
@@ -1033,14 +1065,18 @@ def show_create_purchase_order(username: str):
                     )
                 
                 if success:
-                    st.success(f"✅ Purchase Order {po_number} created successfully!")
-                    
+                    st.success(f"✅ Purchase Order {po_number_input} created successfully!")
+
+                    # Get user profile for full name
+                    user_profile = SessionManager.get_user_profile()
+                    full_name = user_profile.get('full_name', st.session_state.user.get('email', 'Unknown'))
+
                     ActivityLogger.log(
                         user_id=st.session_state.user['id'],
                         action_type='create_po',
                         module_key='inventory_management',
-                        description=f"Created PO: {po_number}",
-                        metadata={'po_number': po_number, 'item': selected_item_name},
+                        description=f"Created PO: {po_number_input} by {full_name}",
+                        metadata={'po_number': po_number_input, 'item': selected_item_name},
                         user_email=st.session_state.user.get('email')
                     )
                     

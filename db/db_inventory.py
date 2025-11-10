@@ -1,8 +1,19 @@
 """
-Inventory Database Operations V2.1.3
-Added supplier delete functionality
+Inventory Database Operations V2.1.4
+Enhanced PO display with proper joins
 
 VERSION HISTORY:
+2.1.4 - Enhanced purchase order display - 10/11/25
+      CHANGES:
+      - get_pos() - Added joins for item_master and user_profiles
+      FEATURES:
+      - PO list now shows actual item names instead of IDs
+      - PO list now shows creator's full name instead of UUID
+      - PO list now includes unit information from item_master
+      FIXES:
+      - Fixed "created_by" showing UUID instead of username
+      - Fixed missing item_name in PO display
+
 2.1.3 - Added supplier deletion with validation - 10/11/25
       ADDITIONS:
       - delete_supplier() - Delete suppliers (only if not used as default by items)
@@ -1185,27 +1196,35 @@ class InventoryDB:
         """Get purchase orders (v2.0.0 signature)"""
         try:
             db = Database.get_client()
-            
+
             since_date = datetime.now() - timedelta(days=days)
-            
+
             query = db.table('purchase_orders') \
-                .select('*, suppliers(supplier_name)') \
+                .select('*, suppliers(supplier_name), item_master(item_name, unit), user_profiles!purchase_orders_created_by_fkey(full_name)') \
                 .gte('po_date', since_date.date().isoformat()) \
                 .order('po_date', desc=True)
-            
+
             if status:
                 query = query.eq('status', status)
-            
+
             response = query.execute()
-            
+
             # Flatten
             pos = response.data if response.data else []
             for po in pos:
                 if po.get('suppliers'):
                     po['supplier_name'] = po['suppliers']['supplier_name']
-            
+                if po.get('item_master'):
+                    po['item_name'] = po['item_master']['item_name']
+                    po['unit'] = po['item_master'].get('unit', '')
+                if po.get('user_profiles'):
+                    po['created_by'] = po['user_profiles']['full_name']
+                else:
+                    # Fallback if profile not found
+                    po['created_by'] = po.get('created_by', 'Unknown')
+
             return pos
-        
+
         except Exception as e:
             st.error(f"Error fetching POs: {str(e)}")
             return []
