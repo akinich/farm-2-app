@@ -705,36 +705,59 @@ class ActivityLogger:
             description: str = None, metadata: Dict = None, success: bool = True) -> bool:
         """Log user activity"""
         try:
+            # Validate inputs
+            if not user_id:
+                print("Warning: ActivityLogger.log called without user_id")
+                return False
+
+            if not action_type:
+                print("Warning: ActivityLogger.log called without action_type")
+                return False
+
             db = Database.get_client()
 
-            # Get user email
+            # Get user email - with better error handling
+            user_email = 'Unknown'
             try:
                 user_response = db.auth.admin.get_user_by_id(user_id)
-                user_email = user_response.user.email if user_response.user else 'Unknown'
+                if user_response and user_response.user and user_response.user.email:
+                    user_email = user_response.user.email
             except Exception as email_error:
-                # If getting email fails, use a fallback
-                user_email = 'Unknown'
-                print(f"Warning: Could not fetch user email: {str(email_error)}")
+                # If getting email fails, continue with 'Unknown'
+                print(f"Info: Could not fetch user email for {user_id}: {str(email_error)}")
 
             log_data = {
-                'user_id': user_id,
+                'user_id': str(user_id),  # Ensure it's a string
                 'user_email': user_email,
                 'action_type': action_type,
                 'description': description,
                 'module_key': module_key,
                 'success': success,
-                'metadata': metadata
+                'metadata': metadata if metadata else None
             }
 
             # Insert with service role (bypasses RLS)
-            db.table('activity_logs').insert(log_data).execute()
-            return True
+            result = db.table('activity_logs').insert(log_data).execute()
+
+            # Check if insert was successful
+            if result.data:
+                print(f"✓ Activity logged: {action_type} by {user_email}")
+                return True
+            else:
+                print(f"Warning: Activity log insert returned no data")
+                return False
+
         except Exception as e:
-            # Show error to help debug (temporary - remove after fixing)
-            error_msg = f"Error logging activity: {str(e)}"
+            # Show detailed error for debugging
+            error_msg = f"❌ Activity log error: {str(e)}"
             print(error_msg)
-            # Showing errors in Streamlit for debugging
-            st.warning(f"⚠️ Activity log failed: {str(e)}")
+
+            # Show in Streamlit for debugging (will remove once fixed)
+            try:
+                st.error(f"⚠️ Activity logging failed: {str(e)}")
+            except:
+                pass  # In case st is not available
+
             return False
     
     @staticmethod
