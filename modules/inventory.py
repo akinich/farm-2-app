@@ -3,6 +3,15 @@ Inventory Management Module
 Complete inventory system with batch tracking, FIFO, expiry management, and cost tracking
 
 VERSION HISTORY:
+2.1.5 - Align reorder threshold field - 10/11/25
+      FIXES:
+      - Use reorder_threshold column adopted in item_master schema
+      - Backfill reorder_level display values from reorder_threshold
+      CHANGES:
+      - show_add_master_item
+      - show_edit_master_item
+      - show_all_master_items
+
 2.1.4 - Align master item supplier field - 10/11/25
       FIXES:
       - Map supplier selections to supplier_id to match item_master schema
@@ -458,6 +467,9 @@ def show_add_stock_tab(username: str):
     
     # Get master items for dropdown
     master_items = InventoryDB.get_all_master_items(active_only=True)
+    for item in master_items:
+        if 'reorder_level' not in item and 'reorder_threshold' in item:
+            item['reorder_level'] = item['reorder_threshold']
     
     if not master_items:
         st.warning("⚠️ No active items in master list. Ask admin to add items first.")
@@ -872,6 +884,9 @@ def show_create_purchase_order(username: str):
     st.markdown("#### ➕ Create Purchase Order")
     
     master_items = InventoryDB.get_all_master_items(active_only=True)
+    for item in master_items:
+        if 'reorder_level' not in item and 'reorder_threshold' in item:
+            item['reorder_level'] = item['reorder_threshold']
     suppliers = InventoryDB.get_all_suppliers(active_only=True)
     
     if not master_items:
@@ -1121,6 +1136,9 @@ def show_history_tab(username: str, is_admin: bool):
     
     with col3:
         master_items = InventoryDB.get_all_master_items()
+        for item in master_items:
+            if 'reorder_level' not in item and 'reorder_threshold' in item:
+                item['reorder_level'] = item['reorder_threshold']
         item_names = ["All"] + [item['item_name'] for item in master_items]
         item_filter = st.selectbox(
             "Item",
@@ -1257,6 +1275,9 @@ def show_all_master_items():
     
     # Display
     df = pd.DataFrame(items)
+    
+    if 'reorder_level' not in df.columns and 'reorder_threshold' in df.columns:
+        df['reorder_level'] = df['reorder_threshold']
     display_cols = ['item_name', 'sku', 'category', 'brand', 'unit', 'current_qty', 'reorder_level', 'is_active']
     display_cols = [col for col in display_cols if col in df.columns]
     
@@ -1308,7 +1329,7 @@ def show_add_master_item(username: str):
             )
         
         with col2:
-            reorder_level = st.number_input("Reorder Level *", min_value=0.0, step=0.01, format="%.2f")
+            reorder_threshold = st.number_input("Reorder Level *", min_value=0.0, step=0.01, format="%.2f")
             
             suppliers = InventoryDB.get_all_suppliers(active_only=True)
             supplier_options = [None] + [s['id'] for s in suppliers if s.get('id') is not None]
@@ -1343,7 +1364,7 @@ def show_add_master_item(username: str):
             if not category or len(category.strip()) < 2:
                 errors.append("Category is required")
             
-            if reorder_level < 0:
+            if reorder_threshold < 0:
                 errors.append("Reorder level cannot be negative")
             
             if errors:
@@ -1357,7 +1378,7 @@ def show_add_master_item(username: str):
                         category=category.strip(),
                         brand=brand.strip() if brand else None,
                         unit=unit,
-                        reorder_level=reorder_level,
+                        reorder_threshold=reorder_threshold,
                         supplier_id=selected_supplier_id,
                         specifications=specifications.strip() if specifications else None,
                         notes=notes.strip() if notes else None,
@@ -1375,7 +1396,8 @@ def show_add_master_item(username: str):
                     metadata={
                         'item_name': item_name,
                         'sku': sku,
-                        'supplier': selected_supplier_name if selected_supplier_id else None
+                        'supplier': selected_supplier_name if selected_supplier_id else None,
+                        'reorder_threshold': reorder_threshold
                     }
                 )
                 
@@ -1427,7 +1449,19 @@ def show_edit_master_item(username: str):
             )
         
         with col2:
-            reorder_level = st.number_input("Reorder Level *", value=float(selected_item.get('reorder_level', 0)))
+            reorder_threshold_value = selected_item.get('reorder_threshold')
+            if reorder_threshold_value is None:
+                reorder_threshold_value = selected_item.get('reorder_level', 0)
+            try:
+                reorder_threshold_value = float(reorder_threshold_value or 0)
+            except (TypeError, ValueError):
+                reorder_threshold_value = 0.0
+            
+            reorder_threshold = st.number_input(
+                "Reorder Level *",
+                value=reorder_threshold_value,
+                key="edit_master_reorder_threshold"
+            )
             
             suppliers = InventoryDB.get_all_suppliers(active_only=True)
             supplier_options = [None] + [s['id'] for s in suppliers if s.get('id') is not None]
@@ -1472,7 +1506,7 @@ def show_edit_master_item(username: str):
                     category=category.strip(),
                     brand=brand.strip() if brand else None,
                     unit=unit,
-                    reorder_level=reorder_level,
+                    reorder_threshold=reorder_threshold,
                     supplier_id=selected_supplier_id,
                     specifications=specifications.strip() if specifications else None,
                     notes=notes.strip() if notes else None,
@@ -1490,7 +1524,8 @@ def show_edit_master_item(username: str):
                     description=f"Updated master item: {item_name}",
                     metadata={
                         'item_name': item_name,
-                        'supplier': selected_supplier_name if selected_supplier_id else None
+                        'supplier': selected_supplier_name if selected_supplier_id else None,
+                        'reorder_threshold': reorder_threshold
                     }
                 )
                 
