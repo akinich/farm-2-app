@@ -3,6 +3,13 @@ Inventory Management Module
 Complete inventory system with batch tracking, FIFO, expiry management, and cost tracking
 
 VERSION HISTORY:
+2.2.1 - Enhanced PO UI with dynamic unit display - 10/11/25
+      IMPROVEMENTS:
+      - Unit cost label now shows unit dynamically (₹/kg, ₹/g, ₹/L, etc.)
+      - Unit correctly displays from master item data in quantity field
+      FIXES:
+      - Fixed unit display to show actual unit from selected item
+
 2.2.0 - Fixed purchase order creation and activity logging - 10/11/25
       FIXES:
       - Fixed PO creation error by passing user_id (UUID) instead of display name to created_by field
@@ -971,9 +978,10 @@ def show_create_purchase_order(username: str):
                 format="%.2f"
             )
             
-            # Unit cost
+            # Unit cost - with dynamic unit display
+            item_unit = selected_item.get('unit', 'unit')
             unit_cost = st.number_input(
-                "Unit Cost (₹) *",
+                f"Unit Cost (₹/{item_unit}) *",
                 min_value=0.01,
                 step=0.01,
                 format="%.2f"

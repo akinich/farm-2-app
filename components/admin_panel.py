@@ -508,8 +508,14 @@ def show_activity_logs():
         days_back = st.number_input("Days to show", min_value=1, max_value=90, value=7)
     
     with col2:
-        users = UserDB.get_all_users()
-        user_filter = st.selectbox("Filter by user", options=['All'] + [u['email'] for u in users])
+        # Get unique users from activity logs instead of user database
+        logs_for_filter = ActivityLogger.get_logs(days=days_back)
+        if logs_for_filter:
+            df_filter = pd.DataFrame(logs_for_filter)
+            unique_emails = sorted(df_filter['user_email'].dropna().unique().tolist())
+            user_filter = st.selectbox("Filter by user", options=['All'] + unique_emails)
+        else:
+            user_filter = st.selectbox("Filter by user", options=['All'])
     
     with col3:
         action_types = ['All', 'login', 'logout', 'module_access', 'admin_action', 'module_error']
@@ -554,9 +560,20 @@ def show_activity_logs():
             
             st.markdown("---")
             
-            # Display logs
-            display_df = df[['created_at', 'user_email', 'action_type', 'description', 'success']].copy()
-            display_df.columns = ['Timestamp', 'User', 'Action', 'Description', 'Status']
+            # Display logs - include role if available
+            display_columns = ['created_at', 'user_email']
+            if 'user_role' in df.columns:
+                display_columns.append('user_role')
+            display_columns.extend(['action_type', 'description', 'success'])
+
+            display_df = df[display_columns].copy()
+
+            column_names = ['Timestamp', 'User Email']
+            if 'user_role' in df.columns:
+                column_names.append('Role')
+            column_names.extend(['Action', 'Description', 'Status'])
+
+            display_df.columns = column_names
             
             if 'Timestamp' in display_df.columns:
                 display_df['Timestamp'] = pd.to_datetime(display_df['Timestamp'], errors='coerce').dt.strftime('%Y-%m-%d %H:%M:%S')
