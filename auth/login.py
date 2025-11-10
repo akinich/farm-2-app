@@ -2,7 +2,7 @@
 Login Page and Authentication UI
 Farm Management System
 
-VERSION: 1.1.2 - Improved token handling with session state + debugging
+VERSION: 1.1.4 - Fixed button-in-form error with auto-redirect
 """
 import streamlit as st
 from auth.session import SessionManager
@@ -15,8 +15,22 @@ def show_login_page():
     # Use JavaScript to extract hash parameters since Streamlit can't access them directly
     recovery_token = extract_recovery_token()
 
-    # Debug info (remove after testing)
+    # Debug info and manual workaround
     query_params = st.query_params
+
+    # Check if URL has recovery hash but wasn't converted to query params
+    has_recovery_hash = False
+    js_detection = """
+    <script>
+    if (window.location.hash.includes('type=recovery')) {
+        // Signal to Streamlit that we have a hash
+        window.parent.postMessage({type: 'recovery_hash_detected'}, '*');
+    }
+    </script>
+    """
+    st.markdown(js_detection, unsafe_allow_html=True)
+
+    # Show debug info if we detect recovery-related params
     if 'access_token' in query_params or 'recovery_token' in st.session_state:
         st.sidebar.write("🔍 Debug Info:")
         st.sidebar.write(f"Query params: {dict(query_params)}")
@@ -34,6 +48,13 @@ def show_login_page():
             # Show normal login form
             st.markdown("# 🌾 Farm Management Login")
             st.markdown("---")
+
+            # Show manual recovery link instructions if needed
+            st.info("💡 **Password Reset Link?** If you clicked a password reset link and it didn't work, try this:\n\n"
+                   "1. Look at your browser's address bar\n"
+                   "2. If you see a `#` in the URL, replace it with `?`\n"
+                   "3. Press Enter to reload the page\n\n"
+                   "Example: Change `...app/#access_token=...` to `...app/?access_token=...`")
 
             with st.form("login_form"):
                 email = st.text_input("Email", placeholder="your.email@farm.com")
@@ -62,9 +83,10 @@ def extract_recovery_token():
         st.session_state.recovery_token = token
         return token
 
-    # JavaScript to extract from hash and store in session state via query params
+    # Try injecting JavaScript via markdown (more reliable in Streamlit Cloud)
     js_code = """
     <script>
+    (function() {
         const hash = window.location.hash;
 
         if (hash && hash.includes('access_token') && hash.includes('type=recovery')) {
@@ -75,19 +97,19 @@ def extract_recovery_token():
 
             if (type === 'recovery' && accessToken) {
                 // Build new URL with query params
-                const currentUrl = window.location.href.split('#')[0].split('?')[0];
-                const newUrl = currentUrl + '?access_token=' + encodeURIComponent(accessToken) + '&type=recovery';
+                const baseUrl = window.location.origin + window.location.pathname;
+                const newUrl = baseUrl + '?access_token=' + encodeURIComponent(accessToken) + '&type=recovery';
 
-                // Redirect to clean URL with query params
-                if (window.location.href !== newUrl) {
-                    window.location.replace(newUrl);
-                }
+                // Redirect immediately
+                window.location.replace(newUrl);
             }
         }
+    })();
     </script>
     """
 
-    # Inject JavaScript
+    # Try both injection methods for reliability
+    st.markdown(js_code, unsafe_allow_html=True)
     components.html(js_code, height=0)
 
     return None
@@ -123,18 +145,23 @@ def handle_password_reset(recovery_token: str, new_password: str):
         recovery_token: Recovery token from Supabase
         new_password: New password to set
     """
+    import time
+
     with st.spinner("Resetting password..."):
         success, message = SessionManager.reset_password(recovery_token, new_password)
 
         if success:
             st.success("✅ Password reset successful! You can now login with your new password.")
-            st.info("Click below to go to login page")
-            if st.button("Go to Login", use_container_width=True, type="primary"):
-                # Clear recovery token from session state and query params
-                if 'recovery_token' in st.session_state:
-                    del st.session_state.recovery_token
-                st.query_params.clear()
-                st.rerun()
+            st.info("Redirecting to login page...")
+
+            # Clear recovery token from session state and query params
+            if 'recovery_token' in st.session_state:
+                del st.session_state.recovery_token
+            st.query_params.clear()
+
+            # Wait a moment for user to see the success message
+            time.sleep(2)
+            st.rerun()
         else:
             st.error(f"❌ {message}")
 
