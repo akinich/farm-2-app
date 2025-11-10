@@ -3,6 +3,17 @@ Inventory Management Module
 Complete inventory system with batch tracking, FIFO, expiry management, and cost tracking
 
 VERSION HISTORY:
+2.1.6 - Improved category selection UI - 10/11/25
+      ADDITIONS:
+      - Dropdown category selector with existing categories
+      - Option to add new categories inline
+      CHANGES:
+      - show_add_master_item - Replaced free-text category with dropdown + custom input
+      - show_edit_master_item - Added dropdown category selector with current value
+      FIXES:
+      - Prevents foreign key constraint errors by using validated categories
+      - Better UX with existing category suggestions
+
 2.1.5 - Align master item schema - 10/11/25
       FIXES:
       - Use reorder_threshold column adopted in item_master schema
@@ -1329,7 +1340,27 @@ def show_add_master_item(username: str):
         with col1:
             item_name = st.text_input("Item Name *", placeholder="e.g., Fish Feed 3mm 28% Protein")
             sku = st.text_input("SKU *", placeholder="e.g., FF-3MM-28P")
-            category = st.text_input("Category *", placeholder="e.g., Fish Feed")
+
+            # Category selection with dropdown + custom option
+            existing_categories = InventoryDB.get_all_categories()
+            category_options = ["-- Add New Category --"] + existing_categories
+
+            selected_category_option = st.selectbox(
+                "Category *",
+                options=category_options,
+                key="add_master_category_select"
+            )
+
+            # If "Add New Category" selected, show text input
+            if selected_category_option == "-- Add New Category --":
+                category = st.text_input(
+                    "Enter New Category Name *",
+                    placeholder="e.g., Fish Feed, Chemicals, Equipment",
+                    key="add_master_new_category_input"
+                )
+            else:
+                category = selected_category_option
+
             brand = st.text_input("Brand/Manufacturer", placeholder="e.g., Growel")
             unit = st.selectbox(
                 "Unit *",
@@ -1450,9 +1481,42 @@ def show_edit_master_item(username: str):
         with col1:
             item_name = st.text_input("Item Name *", value=selected_item.get('item_name', ''))
             sku = st.text_input("SKU *", value=selected_item.get('sku', ''))
-            category = st.text_input("Category *", value=selected_item.get('category', ''))
+
+            # Category selection with dropdown + custom option
+            current_category = selected_item.get('category', '')
+            existing_categories = InventoryDB.get_all_categories()
+
+            # Build category options with current category first if it exists
+            if current_category and current_category not in existing_categories:
+                category_options = [current_category, "-- Add New Category --"] + existing_categories
+            else:
+                category_options = ["-- Add New Category --"] + existing_categories
+
+            # Set initial selection to current category or first option
+            default_index = 0
+            if current_category in category_options:
+                default_index = category_options.index(current_category)
+
+            selected_category_option = st.selectbox(
+                "Category *",
+                options=category_options,
+                index=default_index,
+                key="edit_master_category_select"
+            )
+
+            # If "Add New Category" selected, show text input
+            if selected_category_option == "-- Add New Category --":
+                category = st.text_input(
+                    "Enter New Category Name *",
+                    value=current_category,
+                    placeholder="e.g., Fish Feed, Chemicals, Equipment",
+                    key="edit_master_new_category_input"
+                )
+            else:
+                category = selected_category_option
+
             brand = st.text_input("Brand", value=selected_item.get('brand', '') or '')
-            
+
             units = ["kg", "g", "liter", "ml", "pieces", "bags", "boxes"]
             current_unit = selected_item.get('unit', 'kg')
             unit_index = units.index(current_unit) if current_unit in units else 0
