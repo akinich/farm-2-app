@@ -3,6 +3,18 @@ Database configuration and connection utilities for Supabase
 Farm Management System
 
 VERSION HISTORY:
+1.6.0 - Enhanced role detection and user profile fetching - 10/11/25
+      CHANGES:
+      - get_user_profile() - Now joins with roles table to fetch role_name
+      - ActivityLogger.log() - Fetches user_profile from database if not in session
+      FEATURES:
+      - User profile now includes role_name from roles table
+      - Activity logger automatically caches user_profile in session for performance
+      - Proper fallback chain: session -> database -> default
+      FIXES:
+      - Fixed admin role showing as "user" in activity logs
+      - Fixed role detection when user_profile not in session state
+
 1.5.0 - Added user role tracking to activity logs - 10/11/25
       ADDITIONS:
       - user_role parameter to ActivityLogger.log()
@@ -114,8 +126,20 @@ class UserDB:
         """Get user profile with role information"""
         try:
             db = Database.get_client()
-            response = db.table('user_details').select('*').eq('id', user_id).execute()
-            return response.data[0] if response.data else None
+            response = db.table('user_details') \
+                .select('*, roles(role_name)') \
+                .eq('id', user_id) \
+                .execute()
+
+            if response.data:
+                profile = response.data[0]
+                # Flatten role information
+                if profile.get('roles'):
+                    profile['role_name'] = profile['roles']['role_name']
+                else:
+                    profile['role_name'] = 'user'  # Default if no role found
+                return profile
+            return None
         except Exception as e:
             st.error(f"Error fetching user profile: {str(e)}")
             return None
@@ -761,10 +785,21 @@ class ActivityLogger:
                         if not user_email or user_email == 'Unknown':
                             user_email = st.session_state.user.get('email', 'Unknown')
 
-                        # Get role from session
+                        # Get role from session - check user_profile first
                         if 'user_profile' in st.session_state and st.session_state.user_profile:
                             role_name = st.session_state.user_profile.get('role_name', '').lower()
                             user_role = 'admin' if role_name == 'admin' else 'user'
+                        else:
+                            # If user_profile not in session, fetch from database
+                            try:
+                                profile = UserDB.get_user_profile(user_id)
+                                if profile:
+                                    # Cache in session for future calls
+                                    st.session_state.user_profile = profile
+                                    role_name = profile.get('role_name', '').lower()
+                                    user_role = 'admin' if role_name == 'admin' else 'user'
+                            except Exception as profile_error:
+                                print(f"Info: Could not fetch user profile for role: {str(profile_error)}")
                 except:
                     pass
 
