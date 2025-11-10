@@ -3,10 +3,11 @@ Inventory Management Module
 Complete inventory system with batch tracking, FIFO, expiry management, and cost tracking
 
 VERSION HISTORY:
-2.1.5 - Align reorder threshold field - 10/11/25
+2.1.5 - Align master item schema - 10/11/25
       FIXES:
       - Use reorder_threshold column adopted in item_master schema
       - Backfill reorder_level display values from reorder_threshold
+      - Store default supplier via default_supplier_id column when available
       CHANGES:
       - show_add_master_item
       - show_edit_master_item
@@ -470,6 +471,8 @@ def show_add_stock_tab(username: str):
     for item in master_items:
         if 'reorder_level' not in item and 'reorder_threshold' in item:
             item['reorder_level'] = item['reorder_threshold']
+        if 'default_supplier_id' not in item and 'supplier_id' in item:
+            item['default_supplier_id'] = item['supplier_id']
     
     if not master_items:
         st.warning("⚠️ No active items in master list. Ask admin to add items first.")
@@ -887,6 +890,8 @@ def show_create_purchase_order(username: str):
     for item in master_items:
         if 'reorder_level' not in item and 'reorder_threshold' in item:
             item['reorder_level'] = item['reorder_threshold']
+        if 'default_supplier_id' not in item and 'supplier_id' in item:
+            item['default_supplier_id'] = item['supplier_id']
     suppliers = InventoryDB.get_all_suppliers(active_only=True)
     
     if not master_items:
@@ -1139,6 +1144,8 @@ def show_history_tab(username: str, is_admin: bool):
         for item in master_items:
             if 'reorder_level' not in item and 'reorder_threshold' in item:
                 item['reorder_level'] = item['reorder_threshold']
+            if 'default_supplier_id' not in item and 'supplier_id' in item:
+                item['default_supplier_id'] = item['supplier_id']
         item_names = ["All"] + [item['item_name'] for item in master_items]
         item_filter = st.selectbox(
             "Item",
@@ -1372,6 +1379,10 @@ def show_add_master_item(username: str):
                     st.error(f"❌ {error}")
             else:
                 with st.spinner("Adding item..."):
+                    supplier_kwargs = {}
+                    if selected_supplier_id is not None:
+                        supplier_kwargs["default_supplier_id"] = selected_supplier_id
+                    
                     success = InventoryDB.add_master_item(
                         item_name=item_name.strip(),
                         sku=sku.strip(),
@@ -1379,10 +1390,10 @@ def show_add_master_item(username: str):
                         brand=brand.strip() if brand else None,
                         unit=unit,
                         reorder_threshold=reorder_threshold,
-                        supplier_id=selected_supplier_id,
                         specifications=specifications.strip() if specifications else None,
                         notes=notes.strip() if notes else None,
-                        username=username
+                        username=username,
+                        **supplier_kwargs
                     )
             
             if success:
@@ -1397,6 +1408,7 @@ def show_add_master_item(username: str):
                         'item_name': item_name,
                         'sku': sku,
                         'supplier': selected_supplier_name if selected_supplier_id else None,
+                        'default_supplier_id': selected_supplier_id,
                         'reorder_threshold': reorder_threshold
                     }
                 )
@@ -1470,7 +1482,9 @@ def show_edit_master_item(username: str):
                 **{s['id']: s.get('supplier_name', f"Supplier #{s['id']}") for s in suppliers if s.get('id') is not None}
             }
             
-            current_supplier_id = selected_item.get('supplier_id')
+            current_supplier_id = selected_item.get('default_supplier_id')
+            if current_supplier_id is None:
+                current_supplier_id = selected_item.get('supplier_id')
             if current_supplier_id is not None and current_supplier_id not in supplier_label_map:
                 supplier_options.append(current_supplier_id)
                 supplier_label_map[current_supplier_id] = selected_item.get('supplier_name', f"Supplier #{current_supplier_id}")
@@ -1507,7 +1521,7 @@ def show_edit_master_item(username: str):
                     brand=brand.strip() if brand else None,
                     unit=unit,
                     reorder_threshold=reorder_threshold,
-                    supplier_id=selected_supplier_id,
+                    default_supplier_id=selected_supplier_id,
                     specifications=specifications.strip() if specifications else None,
                     notes=notes.strip() if notes else None,
                     is_active=is_active,
@@ -1525,6 +1539,7 @@ def show_edit_master_item(username: str):
                     metadata={
                         'item_name': item_name,
                         'supplier': selected_supplier_name if selected_supplier_id else None,
+                        'default_supplier_id': selected_supplier_id,
                         'reorder_threshold': reorder_threshold
                     }
                 )
