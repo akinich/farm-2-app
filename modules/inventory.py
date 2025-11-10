@@ -3,6 +3,17 @@ Inventory Management Module
 Complete inventory system with batch tracking, FIFO, expiry management, and cost tracking
 
 VERSION HISTORY:
+2.2.0 - Fixed purchase order creation and activity logging - 10/11/25
+      FIXES:
+      - Fixed PO creation error by passing user_id (UUID) instead of display name to created_by field
+      - Added explicit user_email to ActivityLogger calls for better tracking
+      CHANGES:
+      - create_purchase_order now receives user_id instead of username string
+      - ActivityLogger.log calls now pass user_email explicitly from session state
+      IMPROVEMENTS:
+      - Purchase orders now save correctly with proper user tracking
+      - Activity logs will show actual email addresses instead of "Unknown"
+
 2.1.9 - Enhanced history tab and removed unit cost from current stock - 10/11/25
       ADDITIONS:
       - Added 'Unit' column to transaction history tab
@@ -1000,7 +1011,7 @@ def show_create_purchase_order(username: str):
             else:
                 with st.spinner("Creating purchase order..."):
                     po_number = f"PO-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
-                    
+
                     success = InventoryDB.create_purchase_order(
                         po_number=po_number,
                         item_master_id=selected_item['id'],
@@ -1010,7 +1021,7 @@ def show_create_purchase_order(username: str):
                         po_date=po_date,
                         expected_delivery=expected_delivery,
                         notes=notes.strip() if notes else None,
-                        username=username
+                        username=st.session_state.user['id']  # Pass user_id (UUID) not display name
                     )
                 
                 if success:
@@ -1021,7 +1032,8 @@ def show_create_purchase_order(username: str):
                         action_type='create_po',
                         module_key='inventory_management',
                         description=f"Created PO: {po_number}",
-                        metadata={'po_number': po_number, 'item': selected_item_name}
+                        metadata={'po_number': po_number, 'item': selected_item_name},
+                        user_email=st.session_state.user.get('email')
                     )
                     
                     time.sleep(1)
