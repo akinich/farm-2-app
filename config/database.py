@@ -287,17 +287,33 @@ class UserDB:
                    }
                })
            except Exception as auth_error:
-               error_msg = str(auth_error).lower()
-            
-               if "already registered" in error_msg or "already exists" in error_msg:
-                   st.error(f"❌ Email {email} already exists")
+               error_msg = str(auth_error)
+               error_msg_lower = error_msg.lower()
+
+               # Detailed error logging
+               st.error(f"❌ Auth error: {error_msg}")
+
+               if "already registered" in error_msg_lower or "already exists" in error_msg_lower:
+                   st.info("This email is already registered in the system")
                    return False
-               elif "invalid email" in error_msg:
-                   st.error(f"❌ Invalid email: {email}")
+               elif "invalid email" in error_msg_lower:
+                   st.info(f"The email format appears to be invalid: {email}")
+                   return False
+               elif "user not allowed" in error_msg_lower or "not allowed" in error_msg_lower:
+                   st.error("🔒 User creation blocked by Supabase Auth settings")
+                   st.info("""
+**To fix this:**
+1. Go to Supabase Dashboard → **Authentication** → **Providers**
+2. Click on **Email** provider
+3. Make sure **Enable Email provider** is ON
+4. Under **Confirm email**, set it to **Disabled** (or enable auto-confirmation)
+5. Go to **Settings** tab
+6. Make sure **Enable email signups** is ON
+7. Click **Save**
+                   """)
                    return False
                else:
-                   st.error(f"❌ Auth error: {str(auth_error)}")
-                   st.info("💡 Using auto-confirm workaround...")
+                   st.warning("Check Supabase Auth configuration")
                    return False
         
            if not auth_response.user:
