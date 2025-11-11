@@ -1326,18 +1326,71 @@ class InventoryDB:
             return []
     
     @staticmethod
+    def get_po_by_id(po_id: int) -> Dict:
+        """Get full PO details by ID"""
+        try:
+            db = Database.get_client()
+
+            # Get PO header
+            response = db.table('purchase_orders') \
+                .select('*, suppliers(supplier_name, contact_person, phone, email, address)') \
+                .eq('id', po_id) \
+                .execute()
+
+            if not response.data:
+                return None
+
+            po = response.data[0]
+
+            # Flatten supplier data
+            if po.get('suppliers'):
+                po['supplier_name'] = po['suppliers'].get('supplier_name', 'N/A')
+                po['supplier_contact'] = po['suppliers'].get('contact_person', 'N/A')
+                po['supplier_phone'] = po['suppliers'].get('phone', 'N/A')
+                po['supplier_email'] = po['suppliers'].get('email', 'N/A')
+                po['supplier_address'] = po['suppliers'].get('address', 'N/A')
+
+            # Get created by user name
+            created_by_id = po.get('created_by')
+            if created_by_id:
+                try:
+                    user_response = db.table('user_profiles').select('full_name').eq('id', created_by_id).execute()
+                    if user_response.data:
+                        po['created_by_name'] = user_response.data[0]['full_name']
+                    else:
+                        po['created_by_name'] = 'Unknown'
+                except:
+                    po['created_by_name'] = 'Unknown'
+            else:
+                po['created_by_name'] = 'Unknown'
+
+            # Get all items
+            items = InventoryDB.get_po_items(po_id)
+            po['items'] = items
+
+            # Calculate totals
+            po['total_quantity'] = sum(item.get('quantity_ordered', 0) for item in items)
+            po['total_cost'] = sum(item.get('quantity_ordered', 0) * item.get('unit_cost', 0) for item in items)
+
+            return po
+
+        except Exception as e:
+            st.error(f"Error fetching PO details: {str(e)}")
+            return None
+
+    @staticmethod
     def update_po_status(po_id: int, new_status: str) -> bool:
         """Update PO status"""
         try:
             db = Database.get_client()
-            
+
             db.table('purchase_orders') \
                 .update({'status': new_status, 'updated_at': datetime.now().isoformat()}) \
                 .eq('id', po_id) \
                 .execute()
-            
+
             return True
-        
+
         except Exception as e:
             st.error(f"Error updating PO: {str(e)}")
             return False

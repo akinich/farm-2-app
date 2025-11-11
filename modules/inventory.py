@@ -869,96 +869,279 @@ def show_purchase_orders_tab(username: str, is_admin: bool):
         show_create_purchase_order(username)
 
 
+def get_status_badge(status: str) -> str:
+    """Return colored status badge"""
+    status_colors = {
+        'pending': '🟡',
+        'approved': '🔵',
+        'ordered': '🟣',
+        'received': '🟢',
+        'closed': '⚫',
+        'cancelled': '🔴'
+    }
+    icon = status_colors.get(status.lower(), '⚪')
+    return f"{icon} {status.upper()}"
+
+
 def show_all_purchase_orders(username: str, is_admin: bool):
-    """View all purchase orders"""
-    
+    """View all purchase orders with enhanced details and status management"""
+
     st.markdown("#### 📋 All Purchase Orders")
-    
+
     # Filters
     col1, col2, col3 = st.columns(3)
-    
+
     with col1:
         status_filter = st.selectbox(
             "Status",
-            ["All", "pending", "approved", "ordered", "received", "cancelled"],
+            ["All", "pending", "approved", "ordered", "received", "closed", "cancelled"],
             key="po_status_filter_select"
         )
-    
+
     with col2:
         days_back = st.number_input("Days to show", min_value=7, max_value=365, value=30)
-    
+
     with col3:
         if st.button("🔄 Refresh", width='stretch', key="refresh_pos"):
             st.rerun()
-    
+
     # Load POs
     with st.spinner("Loading purchase orders..."):
         if status_filter == "All":
             pos = InventoryDB.get_all_purchase_orders(days_back=days_back)
         else:
             pos = InventoryDB.get_purchase_orders_by_status(status_filter, days_back=days_back)
-    
+
     if not pos:
         st.info("No purchase orders found")
         return
-    
-    st.success(f"✅ Found {len(pos)} purchase orders")
-    
-    # Convert to DataFrame
-    df = pd.DataFrame(pos)
-    
-    # Select columns based on role
-    if is_admin:
-        display_cols = ['po_number', 'item_name', 'supplier_name', 'quantity', 'unit_cost', 'total_cost', 'po_date', 'status', 'created_by']
-    else:
-        # Hide costs
-        display_cols = ['po_number', 'item_name', 'supplier_name', 'quantity', 'po_date', 'status', 'created_by']
-    
-    display_cols = [col for col in display_cols if col in df.columns]
-    display_df = df[display_cols].copy()
-    
-    # Format
-    if 'po_date' in display_df.columns:
-        display_df['po_date'] = pd.to_datetime(display_df['po_date']).dt.strftime('%Y-%m-%d')
-    
-    if 'unit_cost' in display_df.columns:
-        display_df['unit_cost'] = display_df['unit_cost'].apply(lambda x: f"₹{x:.2f}" if pd.notna(x) else 'N/A')
-    
-    if 'total_cost' in display_df.columns:
-        display_df['total_cost'] = display_df['total_cost'].apply(lambda x: f"₹{x:.2f}" if pd.notna(x) else 'N/A')
-    
-    # Rename
-    column_mapping = {
-        'po_number': 'PO #',
-        'item_name': 'Item',
-        'supplier_name': 'Supplier',
-        'quantity': 'Quantity',
-        'unit_cost': 'Unit Cost',
-        'total_cost': 'Total Cost',
-        'po_date': 'Date',
-        'status': 'Status',
-        'created_by': 'Created By'
-    }
-    
-    display_df.rename(columns=column_mapping, inplace=True)
-    
-    st.dataframe(display_df, width='stretch', hide_index=True, height=500)
 
-    # Export - prepare data for download
+    st.success(f"✅ Found {len(pos)} purchase orders")
+
+    # Export all POs - prepare data for download
     from io import BytesIO
+    df_export = pd.DataFrame(pos)
+
+    if is_admin:
+        export_cols = ['po_number', 'item_name', 'supplier_name', 'quantity', 'unit_cost', 'total_cost', 'po_date', 'status', 'created_by']
+    else:
+        export_cols = ['po_number', 'item_name', 'supplier_name', 'quantity', 'po_date', 'status', 'created_by']
+
+    export_cols = [col for col in export_cols if col in df_export.columns]
+    df_export = df_export[export_cols].copy()
+
     output = BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-        display_df.to_excel(writer, index=False, sheet_name='Purchase Orders')
+        df_export.to_excel(writer, index=False, sheet_name='Purchase Orders')
     output.seek(0)
 
     st.download_button(
-        label="📥 Download Excel",
+        label="📥 Download All POs (Excel)",
         data=output,
         file_name=f"purchase_orders_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         width='stretch',
-        key="download_pos_excel"
+        key="download_all_pos_excel"
     )
+
+    st.markdown("---")
+    st.caption("💡 Click on any PO below to view details and manage status")
+
+    # Display each PO as an expandable card
+    for idx, po in enumerate(pos):
+        with st.expander(
+            f"📄 **{po.get('po_number', 'N/A')}** | {get_status_badge(po.get('status', 'pending'))} | "
+            f"{po.get('supplier_name', 'N/A')} | {po.get('item_name', 'N/A')} | "
+            f"₹{po.get('total_cost', 0):,.2f}" if is_admin else
+            f"📄 **{po.get('po_number', 'N/A')}** | {get_status_badge(po.get('status', 'pending'))} | "
+            f"{po.get('supplier_name', 'N/A')} | {po.get('item_name', 'N/A')}",
+            expanded=False
+        ):
+            show_po_details(po, is_admin, username)
+
+
+def show_po_details(po: Dict, is_admin: bool, username: str):
+    """Display detailed PO information with management options"""
+
+    # Get full PO details
+    po_id = po.get('id')
+    po_full = InventoryDB.get_po_by_id(po_id)
+
+    if not po_full:
+        st.error("Could not load PO details")
+        return
+
+    # PO Header Information
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        st.markdown("#### 📋 PO Information")
+        st.markdown(f"**PO Number:** {po_full.get('po_number', 'N/A')}")
+        st.markdown(f"**Status:** {get_status_badge(po_full.get('status', 'pending'))}")
+        st.markdown(f"**PO Date:** {po_full.get('po_date', 'N/A')}")
+        st.markdown(f"**Expected Delivery:** {po_full.get('expected_delivery', 'N/A')}")
+        st.markdown(f"**Created By:** {po_full.get('created_by_name', 'Unknown')}")
+
+    with col2:
+        st.markdown("#### 🏪 Supplier Details")
+        st.markdown(f"**Name:** {po_full.get('supplier_name', 'N/A')}")
+        st.markdown(f"**Contact:** {po_full.get('supplier_contact', 'N/A')}")
+        st.markdown(f"**Phone:** {po_full.get('supplier_phone', 'N/A')}")
+        st.markdown(f"**Email:** {po_full.get('supplier_email', 'N/A')}")
+        if po_full.get('supplier_address') and po_full.get('supplier_address') != 'N/A':
+            st.markdown(f"**Address:** {po_full.get('supplier_address')}")
+
+    with col3:
+        st.markdown("#### 💰 Summary")
+        st.markdown(f"**Total Items:** {len(po_full.get('items', []))}")
+        if is_admin:
+            st.markdown(f"**Total Quantity:** {po_full.get('total_quantity', 0):.2f}")
+            st.markdown(f"**Total Cost:** ₹{po_full.get('total_cost', 0):,.2f}")
+
+        if po_full.get('notes'):
+            st.markdown(f"**Notes:** {po_full.get('notes')}")
+
+    st.markdown("---")
+
+    # Items Table
+    st.markdown("#### 📦 Items")
+    items = po_full.get('items', [])
+
+    if items:
+        items_data = []
+        for item in items:
+            item_row = {
+                'Item Name': item.get('item_name', 'N/A'),
+                'SKU': item.get('sku', 'N/A'),
+                'Quantity': f"{item.get('quantity_ordered', 0):.2f} {item.get('unit', '')}"
+            }
+            if is_admin:
+                item_row['Unit Cost'] = f"₹{item.get('unit_cost', 0):.2f}"
+                item_row['Total'] = f"₹{item.get('quantity_ordered', 0) * item.get('unit_cost', 0):,.2f}"
+
+            items_data.append(item_row)
+
+        st.dataframe(pd.DataFrame(items_data), hide_index=True, width='stretch')
+    else:
+        st.info("No items in this PO")
+
+    st.markdown("---")
+
+    # Action Buttons
+    action_col1, action_col2, action_col3, action_col4 = st.columns(4)
+
+    # Admin Status Management
+    if is_admin:
+        with action_col1:
+            st.markdown("**🔄 Change Status**")
+            current_status = po_full.get('status', 'pending')
+            new_status = st.selectbox(
+                "New Status",
+                ["pending", "approved", "ordered", "received", "closed", "cancelled"],
+                index=["pending", "approved", "ordered", "received", "closed", "cancelled"].index(current_status),
+                key=f"status_change_{po_id}",
+                label_visibility="collapsed"
+            )
+
+            if new_status != current_status:
+                if st.button("✅ Update Status", key=f"update_status_{po_id}", type="primary"):
+                    with st.spinner("Updating status..."):
+                        if InventoryDB.update_po_status(po_id, new_status):
+                            st.success(f"✅ Status updated to {new_status.upper()}")
+
+                            # Log activity
+                            ActivityLogger.log(
+                                user_id=st.session_state.user['id'],
+                                action_type='update_po_status',
+                                module_key='inventory',
+                                description=f"Updated PO {po_full.get('po_number')} status: {current_status} → {new_status}",
+                                metadata={'po_id': po_id, 'old_status': current_status, 'new_status': new_status},
+                                user_email=st.session_state.user.get('email')
+                            )
+
+                            time.sleep(0.5)
+                            st.rerun()
+                        else:
+                            st.error("❌ Failed to update status")
+
+    # Receive Stock Button (for ordered/received status)
+    with action_col2:
+        current_status = po_full.get('status', 'pending')
+        if current_status in ['ordered', 'received']:
+            st.markdown("**📥 Receive Stock**")
+            if st.button("➕ Add to Stock", key=f"receive_stock_{po_id}"):
+                # Store PO info in session state for pre-filling add stock form
+                st.session_state['prefill_from_po'] = {
+                    'po_id': po_id,
+                    'po_number': po_full.get('po_number'),
+                    'items': items,
+                    'supplier_name': po_full.get('supplier_name')
+                }
+                st.info("💡 Switch to 'Add Stock' tab to complete stock receipt")
+                st.info(f"📋 PO details saved for: {po_full.get('po_number')}")
+
+    # Export Single PO
+    with action_col3:
+        st.markdown("**📄 Export PO**")
+
+        # Prepare single PO export
+        po_export_data = {
+            'PO Number': po_full.get('po_number', 'N/A'),
+            'Status': po_full.get('status', 'N/A'),
+            'PO Date': po_full.get('po_date', 'N/A'),
+            'Expected Delivery': po_full.get('expected_delivery', 'N/A'),
+            'Supplier': po_full.get('supplier_name', 'N/A'),
+            'Supplier Contact': po_full.get('supplier_contact', 'N/A'),
+            'Supplier Phone': po_full.get('supplier_phone', 'N/A'),
+            'Created By': po_full.get('created_by_name', 'Unknown')
+        }
+
+        if is_admin:
+            po_export_data['Total Cost'] = f"₹{po_full.get('total_cost', 0):,.2f}"
+
+        if po_full.get('notes'):
+            po_export_data['Notes'] = po_full.get('notes')
+
+        # Create Excel with PO header and items
+        output = BytesIO()
+        with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+            # Header sheet
+            pd.DataFrame([po_export_data]).to_excel(writer, sheet_name='PO Details', index=False)
+
+            # Items sheet
+            if items:
+                items_export = []
+                for item in items:
+                    item_data = {
+                        'Item Name': item.get('item_name', 'N/A'),
+                        'SKU': item.get('sku', 'N/A'),
+                        'Quantity': item.get('quantity_ordered', 0),
+                        'Unit': item.get('unit', '')
+                    }
+                    if is_admin:
+                        item_data['Unit Cost'] = item.get('unit_cost', 0)
+                        item_data['Total Cost'] = item.get('quantity_ordered', 0) * item.get('unit_cost', 0)
+
+                    items_export.append(item_data)
+
+                pd.DataFrame(items_export).to_excel(writer, sheet_name='Items', index=False)
+
+        output.seek(0)
+
+        st.download_button(
+            label="📥 Download",
+            data=output,
+            file_name=f"PO_{po_full.get('po_number', 'export')}_{datetime.now().strftime('%Y%m%d')}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            key=f"download_po_{po_id}"
+        )
+
+    # Delete PO (Admin only, pending status only)
+    if is_admin and po_full.get('status') == 'pending':
+        with action_col4:
+            st.markdown("**🗑️ Delete PO**")
+            if st.button("❌ Delete", key=f"delete_po_{po_id}", type="secondary"):
+                st.warning("⚠️ Delete functionality not implemented yet. Please cancel the PO instead.")
 
 
 def show_create_purchase_order(username: str):
