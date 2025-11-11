@@ -84,11 +84,65 @@ def handle_forgot_password(email: str):
         try:
             db = Database.get_client()
 
+            # First, check if user exists (for better feedback)
+            try:
+                # Query to see if user exists
+                users_response = db.table('user_details').select('email').eq('email', email.lower()).execute()
+                user_exists = users_response.data and len(users_response.data) > 0
+            except:
+                user_exists = None  # Can't determine
+
             # Send password reset email
             response = db.auth.reset_password_email(email)
 
-            st.success("✅ Password reset link sent! Check your email.")
-            st.info("**Important:** After clicking the reset link in your email:\n\n"
+            st.success("✅ Password reset request sent!")
+
+            if user_exists is False:
+                st.warning("⚠️ **Note:** No account found with this email address. If the account exists, you'll receive an email.")
+
+            st.info("📧 **If you don't see the email:**\n\n"
+                   "1. **Check your spam/junk folder**\n"
+                   "2. Wait 2-3 minutes (emails can be delayed)\n"
+                   "3. Make sure the email address is correct\n"
+                   "4. Check the troubleshooting tips below if still not receiving")
+
+            with st.expander("🔍 Common Issues (Click if no email after 5 minutes)", expanded=False):
+                st.markdown(f"""
+### Why You Might Not Be Receiving Emails:
+
+**1. Sender Email Mismatch** ⚠️ **MOST COMMON**
+- In Supabase → Authentication → Email Templates → SMTP Settings
+- The **"Sender email"** MUST be the same as your Zoho email address
+- Example: If your Zoho account is `noreply@yourfarm.com`, the sender email must be exactly `noreply@yourfarm.com`
+- Zoho will reject emails if sender doesn't match
+
+**2. Check Supabase Logs:**
+- Go to: Supabase Dashboard → Logs → Auth Logs
+- Look for recent password reset attempts for `{email}`
+- Check for any error messages about email delivery
+
+**3. Verify SMTP Settings:**
+- Supabase Dashboard → Authentication → Email Templates → SMTP Settings
+- Click **"Send test email"** to verify SMTP is working
+- If test email doesn't arrive, SMTP setup has an issue
+
+**4. Rate Limiting:**
+- Supabase limits password reset emails to prevent abuse
+- Try again after 60 seconds if you sent multiple requests
+
+**5. Email Template Configuration:**
+- Supabase Dashboard → Authentication → Email Templates
+- Click on **"Reset Password"** template
+- Verify the template is enabled
+- Check that redirect URL is correct: `https://farm2app.streamlit.app`
+
+**6. Zoho Email Domain Verification:**
+- If using a custom domain (not @zohomail.com)
+- Verify the domain is properly set up in Zoho
+- Check SPF and DKIM records are configured
+                """)
+
+            st.info("**After clicking the reset link in your email:**\n\n"
                    "1. Look at your browser's address bar\n"
                    "2. If you see a `#` in the URL, **replace it with `?`**\n"
                    "3. Press Enter to reload the page\n"
@@ -120,7 +174,7 @@ def handle_forgot_password(email: str):
    - Or must be an alias/domain verified in your Zoho account
 
 4. **Email Exists?**
-   - Make sure the email address `{email}` is registered in the system
+   - Make sure the email address is registered in the system
    - Try logging in first to verify the account exists
 
 5. **Supabase Auth Settings:**
