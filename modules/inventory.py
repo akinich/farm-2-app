@@ -195,6 +195,52 @@ except ImportError:
         st.stop()
 
 
+# =====================================================
+# CACHED DATA LOADERS (Performance Optimization)
+# =====================================================
+
+@st.cache_data(ttl=300, show_spinner=False)  # Cache for 5 minutes
+def get_master_items_cached(active_only: bool = True):
+    """Cached wrapper for getting master items"""
+    return InventoryDB.get_all_master_items(active_only=active_only)
+
+
+@st.cache_data(ttl=300, show_spinner=False)  # Cache for 5 minutes
+def get_suppliers_cached(active_only: bool = True):
+    """Cached wrapper for getting suppliers"""
+    return InventoryDB.get_all_suppliers(active_only=active_only)
+
+
+@st.cache_data(ttl=60, show_spinner=False)  # Cache for 1 minute
+def get_purchase_orders_cached(status: str, days_back: int):
+    """Cached wrapper for getting purchase orders"""
+    if status == "All":
+        return InventoryDB.get_all_purchase_orders(days_back=days_back)
+    else:
+        return InventoryDB.get_purchase_orders_by_status(status, days_back=days_back)
+
+
+@st.cache_data(ttl=60, show_spinner=False)  # Cache for 1 minute
+def generate_pos_excel(pos: List[Dict], is_admin: bool) -> bytes:
+    """Generate Excel file for purchase orders (cached)"""
+    df_export = pd.DataFrame(pos)
+
+    if is_admin:
+        export_cols = ['po_number', 'item_name', 'supplier_name', 'quantity', 'unit_cost', 'total_cost', 'po_date', 'status', 'created_by']
+    else:
+        export_cols = ['po_number', 'item_name', 'supplier_name', 'quantity', 'po_date', 'status', 'created_by']
+
+    export_cols = [col for col in export_cols if col in df_export.columns]
+    df_export = df_export[export_cols].copy()
+
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+        df_export.to_excel(writer, index=False, sheet_name='Purchase Orders')
+    output.seek(0)
+
+    return output.getvalue()
+
+
 def show():
     """Main entry point for the Inventory Management module"""
     
@@ -512,8 +558,8 @@ def show_add_stock_tab(username: str):
 
     st.markdown("### ➕ Add New Stock")
 
-    # Get master items for dropdown
-    master_items = InventoryDB.get_all_master_items(active_only=True)
+    # Get master items for dropdown (cached)
+    master_items = get_master_items_cached(active_only=True)
     for item in master_items:
         if 'reorder_level' not in item and 'reorder_threshold' in item:
             item['reorder_level'] = item['reorder_threshold']
@@ -553,8 +599,8 @@ def show_add_stock_tab(username: str):
             st.markdown(f"**Current Stock:** {selected_item.get('current_qty', 0)} {selected_item.get('unit', '')}")
             st.markdown(f"**Reorder Level:** {selected_item.get('reorder_level', 0)}")
 
-    # Get suppliers for dropdown
-    suppliers = InventoryDB.get_all_suppliers(active_only=True)
+    # Get suppliers for dropdown (cached)
+    suppliers = get_suppliers_cached(active_only=True)
     supplier_list = ["Select Supplier"] + [s['supplier_name'] for s in suppliers]
 
     # Find default supplier name for the selected item
@@ -906,12 +952,9 @@ def show_all_purchase_orders(username: str, is_admin: bool):
         if st.button("🔄 Refresh", width='stretch', key="refresh_pos"):
             st.rerun()
 
-    # Load POs
+    # Load POs (using cache)
     with st.spinner("Loading purchase orders..."):
-        if status_filter == "All":
-            pos = InventoryDB.get_all_purchase_orders(days_back=days_back)
-        else:
-            pos = InventoryDB.get_purchase_orders_by_status(status_filter, days_back=days_back)
+        pos = get_purchase_orders_cached(status_filter, days_back)
 
     if not pos:
         st.info("No purchase orders found")
@@ -919,29 +962,15 @@ def show_all_purchase_orders(username: str, is_admin: bool):
 
     st.success(f"✅ Found {len(pos)} purchase orders")
 
-    # Export all POs - prepare data for download
-    from io import BytesIO
-    df_export = pd.DataFrame(pos)
-
-    if is_admin:
-        export_cols = ['po_number', 'item_name', 'supplier_name', 'quantity', 'unit_cost', 'total_cost', 'po_date', 'status', 'created_by']
-    else:
-        export_cols = ['po_number', 'item_name', 'supplier_name', 'quantity', 'po_date', 'status', 'created_by']
-
-    export_cols = [col for col in export_cols if col in df_export.columns]
-    df_export = df_export[export_cols].copy()
-
-    output = BytesIO()
-    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-        df_export.to_excel(writer, index=False, sheet_name='Purchase Orders')
-    output.seek(0)
+    # Export all POs - use cached Excel generation
+    excel_data = generate_pos_excel(pos, is_admin)
 
     st.download_button(
         label="📥 Download All POs (Excel)",
-        data=output,
+        data=excel_data,
         file_name=f"purchase_orders_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        width='stretch',
+        use_container_width=True,
         key="download_all_pos_excel"
     )
 
@@ -1156,8 +1185,8 @@ def show_create_purchase_order(username: str):
     if 'po_number_draft' not in st.session_state:
         st.session_state.po_number_draft = f"PO-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
 
-    master_items = InventoryDB.get_all_master_items(active_only=True)
-    suppliers = InventoryDB.get_all_suppliers(active_only=True)
+    master_items = get_master_items_cached(active_only=True)
+    suppliers = get_suppliers_cached(active_only=True)
 
     if not master_items:
         st.warning("⚠️ No active items in master list")
