@@ -1208,12 +1208,16 @@ class InventoryDB:
     
     @staticmethod
     def get_pos(status: str = None, days: int = 90) -> List[Dict]:
-        """Get purchase orders (v2.0.0 signature)"""
+        """
+        Get purchase orders - OPTIMIZED VERSION (No N+1 queries)
+        Uses batch queries to fetch all data in 3 queries instead of 1+N+N
+        """
         try:
             db = Database.get_client()
 
             since_date = datetime.now() - timedelta(days=days)
 
+            # Query 1: Fetch all POs with supplier info
             query = db.table('purchase_orders') \
                 .select('*, suppliers(supplier_name)') \
                 .gte('po_date', since_date.date().isoformat()) \
@@ -1224,59 +1228,91 @@ class InventoryDB:
 
             response = query.execute()
 
-            # Flatten
             pos = response.data if response.data else []
+
+            if not pos:
+                return []
+
+            # Flatten supplier data
             for po in pos:
                 if po.get('suppliers'):
                     po['supplier_name'] = po['suppliers']['supplier_name']
 
-                # Get user full name from created_by UUID
-                created_by_id = po.get('created_by')
-                if created_by_id:
-                    try:
-                        user_response = db.table('user_profiles').select('full_name').eq('id', created_by_id).execute()
-                        if user_response.data and len(user_response.data) > 0:
-                            po['created_by'] = user_response.data[0]['full_name']
-                        else:
-                            po['created_by'] = 'Unknown'
-                    except:
-                        po['created_by'] = 'Unknown'
-                else:
-                    po['created_by'] = 'Unknown'
+            # Query 2: Batch fetch all user profiles for created_by
+            user_ids = [po.get('created_by') for po in pos if po.get('created_by')]
+            user_map = {}
 
-                # Fetch items for this PO to get item name and totals
+            if user_ids:
                 try:
-                    items_response = db.table('purchase_order_items') \
-                        .select('*, item_master(item_name, unit)') \
-                        .eq('po_id', po['id']) \
+                    # Remove duplicates
+                    unique_user_ids = list(set(user_ids))
+                    user_response = db.table('user_profiles') \
+                        .select('id, full_name') \
+                        .in_('id', unique_user_ids) \
                         .execute()
 
-                    if items_response.data:
-                        # Get first item's name and unit for display
-                        first_item = items_response.data[0]
-                        if first_item.get('item_master'):
-                            po['item_name'] = first_item['item_master']['item_name']
-                            po['unit'] = first_item['item_master'].get('unit', '')
+                    if user_response.data:
+                        user_map = {user['id']: user['full_name'] for user in user_response.data}
+                except Exception as e:
+                    print(f"Warning: Could not batch fetch user profiles: {str(e)}")
 
-                        # Calculate totals from items
-                        po['quantity'] = sum(item.get('ordered_qty', 0) for item in items_response.data)
-                        po['unit_cost'] = items_response.data[0].get('unit_cost', 0) if items_response.data else 0
-                        po['total_cost'] = sum(item.get('ordered_qty', 0) * item.get('unit_cost', 0) for item in items_response.data)
+            # Apply user names to POs
+            for po in pos:
+                created_by_id = po.get('created_by')
+                po['created_by'] = user_map.get(created_by_id, 'Unknown')
 
-                        # If multiple items, append count
-                        if len(items_response.data) > 1:
-                            po['item_name'] = f"{po['item_name']} (+{len(items_response.data)-1} more)"
+            # Query 3: Batch fetch ALL items for ALL POs in one query
+            po_ids = [po['id'] for po in pos]
+            all_items = []
+
+            try:
+                items_response = db.table('purchase_order_items') \
+                    .select('*, item_master(item_name, unit)') \
+                    .in_('po_id', po_ids) \
+                    .execute()
+
+                if items_response.data:
+                    all_items = items_response.data
+            except Exception as e:
+                print(f"Warning: Could not batch fetch PO items: {str(e)}")
+
+            # Group items by po_id
+            items_by_po = {}
+            for item in all_items:
+                po_id = item.get('po_id')
+                if po_id not in items_by_po:
+                    items_by_po[po_id] = []
+                items_by_po[po_id].append(item)
+
+            # Apply items data to each PO
+            for po in pos:
+                po_id = po['id']
+                items = items_by_po.get(po_id, [])
+
+                if items:
+                    # Get first item's name and unit for display
+                    first_item = items[0]
+                    if first_item.get('item_master'):
+                        po['item_name'] = first_item['item_master']['item_name']
+                        po['unit'] = first_item['item_master'].get('unit', '')
                     else:
                         po['item_name'] = 'N/A'
-                        po['quantity'] = 0
-                        po['unit_cost'] = 0
-                        po['total_cost'] = 0
-                except Exception as item_error:
-                    print(f"Warning: Could not fetch items for PO {po.get('id')}: {str(item_error)}")
+                        po['unit'] = ''
+
+                    # Calculate totals from items
+                    po['quantity'] = sum(item.get('ordered_qty', 0) for item in items)
+                    po['unit_cost'] = items[0].get('unit_cost', 0)
+                    po['total_cost'] = sum(item.get('ordered_qty', 0) * item.get('unit_cost', 0) for item in items)
+
+                    # If multiple items, append count
+                    if len(items) > 1:
+                        po['item_name'] = f"{po['item_name']} (+{len(items)-1} more)"
+                else:
                     po['item_name'] = 'N/A'
                     po['quantity'] = 0
                     po['unit_cost'] = 0
                     po['total_cost'] = 0
+                    po['unit'] = ''
 
             return pos
 

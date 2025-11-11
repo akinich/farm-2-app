@@ -241,6 +241,12 @@ def generate_pos_excel(pos: List[Dict], is_admin: bool) -> bytes:
     return output.getvalue()
 
 
+@st.cache_data(ttl=60, show_spinner=False)  # Cache for 1 minute
+def get_po_details_cached(po_id: int):
+    """Cached wrapper for getting PO details by ID"""
+    return InventoryDB.get_po_by_id(po_id)
+
+
 def show():
     """Main entry point for the Inventory Management module"""
     
@@ -960,7 +966,37 @@ def show_all_purchase_orders(username: str, is_admin: bool):
         st.info("No purchase orders found")
         return
 
-    st.success(f"✅ Found {len(pos)} purchase orders")
+    total_pos = len(pos)
+    st.success(f"✅ Found {total_pos} purchase orders")
+
+    # Pagination settings
+    page_size = 20
+    total_pages = (total_pos + page_size - 1) // page_size  # Ceiling division
+
+    # Initialize page number in session state
+    if 'po_page_number' not in st.session_state:
+        st.session_state.po_page_number = 1
+
+    # Pagination controls
+    col_pg1, col_pg2, col_pg3, col_pg4, col_pg5 = st.columns([2, 1, 2, 1, 2])
+
+    with col_pg2:
+        if st.button("⬅️ Previous", disabled=(st.session_state.po_page_number == 1), key="prev_page"):
+            st.session_state.po_page_number -= 1
+            st.rerun()
+
+    with col_pg3:
+        st.markdown(f"**Page {st.session_state.po_page_number} of {total_pages}** ({total_pos} total)")
+
+    with col_pg4:
+        if st.button("Next ➡️", disabled=(st.session_state.po_page_number == total_pages), key="next_page"):
+            st.session_state.po_page_number += 1
+            st.rerun()
+
+    # Calculate slice for current page
+    start_idx = (st.session_state.po_page_number - 1) * page_size
+    end_idx = min(start_idx + page_size, total_pos)
+    pos_page = pos[start_idx:end_idx]
 
     # Export all POs - use cached Excel generation
     excel_data = generate_pos_excel(pos, is_admin)
@@ -975,10 +1011,10 @@ def show_all_purchase_orders(username: str, is_admin: bool):
     )
 
     st.markdown("---")
-    st.caption("💡 Click on any PO below to view details and manage status")
+    st.caption(f"💡 Showing {start_idx + 1}-{end_idx} of {total_pos} purchase orders | Click on any PO to view details")
 
-    # Display each PO as an expandable card
-    for idx, po in enumerate(pos):
+    # Display each PO as an expandable card (paginated)
+    for idx, po in enumerate(pos_page, start=start_idx + 1):
         with st.expander(
             f"📄 **{po.get('po_number', 'N/A')}** | {get_status_badge(po.get('status', 'pending'))} | "
             f"{po.get('supplier_name', 'N/A')} | {po.get('item_name', 'N/A')} | "
@@ -991,11 +1027,11 @@ def show_all_purchase_orders(username: str, is_admin: bool):
 
 
 def show_po_details(po: Dict, is_admin: bool, username: str):
-    """Display detailed PO information with management options"""
+    """Display detailed PO information with management options - OPTIMIZED"""
 
-    # Get full PO details
+    # Get full PO details (cached)
     po_id = po.get('id')
-    po_full = InventoryDB.get_po_by_id(po_id)
+    po_full = get_po_details_cached(po_id)
 
     if not po_full:
         st.error("Could not load PO details")
