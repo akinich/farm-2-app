@@ -129,7 +129,7 @@ def show_water_testing_tab(tanks: list, user: dict):
         
         notes = st.text_area("Notes (optional)")
         
-        submitted = st.form_submit_button("💾 Save Water Test", type="primary", use_container_width=True)
+        submitted = st.form_submit_button("💾 Save Water Test", type="primary", width='stretch')
         
         if submitted:
             data = {
@@ -191,7 +191,7 @@ def show_water_testing_tab(tanks: list, user: dict):
         
         df_display.columns = ['Date', 'pH', 'DO (mg/L)', 'NH3 (mg/L)', 'NO2 (mg/L)', 'NO3 (mg/L)', 'Temp (°C)', 'Salinity (ppt)', 'Notes']
         
-        st.dataframe(df_display, use_container_width=True, hide_index=True)
+        st.dataframe(df_display, width='stretch', hide_index=True)
         
         # Show latest test summary
         latest = test_data[0]
@@ -229,7 +229,7 @@ def show_growth_records_tab(tanks: list, user: dict):
         
         notes = st.text_area("Notes (optional)")
         
-        submitted = st.form_submit_button("💾 Save Growth Record", type="primary", use_container_width=True)
+        submitted = st.form_submit_button("💾 Save Growth Record", type="primary", width='stretch')
         
         if submitted:
             if biomass <= 0:
@@ -285,7 +285,7 @@ def show_growth_records_tab(tanks: list, user: dict):
         
         df_display.columns = ['Date', 'Biomass (kg)', 'Fish Count', 'Avg Weight (g)', 'Mortality', 'Notes']
         
-        st.dataframe(df_display, use_container_width=True, hide_index=True)
+        st.dataframe(df_display, width='stretch', hide_index=True)
         
         # Show growth trend
         latest = growth_data[0]
@@ -324,7 +324,7 @@ def show_feed_logs_tab(tanks: list, user: dict):
         feeding_time = st.selectbox("Feeding Time *", ["Morning", "Afternoon", "Evening"])
         notes = st.text_area("Notes (optional)")
         
-        submitted = st.form_submit_button("💾 Save Feed Log", type="primary", use_container_width=True)
+        submitted = st.form_submit_button("💾 Save Feed Log", type="primary", width='stretch')
         
         if submitted:
             if not feed_type:
@@ -389,7 +389,7 @@ def show_feed_logs_tab(tanks: list, user: dict):
         
         df_display.columns = ['Date', 'Feed Type', 'Quantity (kg)', 'Time', 'Notes']
         
-        st.dataframe(df_display, use_container_width=True, hide_index=True)
+        st.dataframe(df_display, width='stretch', hide_index=True)
     else:
         st.info("ℹ️ No feed logs yet. Add your first feed log above!")
 
@@ -474,7 +474,7 @@ def show_export_tab(tanks: list):
         start_date = st.date_input("Start Date", date.today() - timedelta(days=30))
         end_date = st.date_input("End Date", date.today())
     
-    if st.button("📥 Generate Excel Report", type="primary", use_container_width=True):
+    if st.button("📥 Generate Excel Report", type="primary", width='stretch'):
         tank_id = tank_options[selected_export_tank]
         
         # Fetch data

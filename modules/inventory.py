@@ -388,7 +388,7 @@ def show_dashboard_tab(username: str, is_admin: bool):
             display_df.columns = ['Date', 'Item', 'Type', 'Quantity', 'Reference', 'User']
             display_df['Date'] = pd.to_datetime(display_df['Date']).dt.strftime('%Y-%m-%d %H:%M')
             
-            st.dataframe(display_df, use_container_width=True, hide_index=True, height=300)
+            st.dataframe(display_df, width='stretch', hide_index=True, height=300)
     else:
         st.info("No recent transactions")
 
@@ -416,7 +416,7 @@ def show_current_stock_tab(username: str, is_admin: bool):
         batch_filter = st.selectbox("Batch Status", ["All", "Active Only", "Depleted"], key="stock_batch")
     
     with col4:
-        if st.button("🔄 Refresh", use_container_width=True, key="refresh_current_stock"):
+        if st.button("🔄 Refresh", width='stretch', key="refresh_current_stock"):
             st.session_state.inv_refresh_trigger += 1
             st.rerun()
     
@@ -481,7 +481,7 @@ def show_current_stock_tab(username: str, is_admin: bool):
     # Display table
     st.dataframe(
         display_df,
-        use_container_width=True,
+        width='stretch',
         hide_index=True,
         height=500
     )
@@ -490,7 +490,7 @@ def show_current_stock_tab(username: str, is_admin: bool):
     col1, col2, col3 = st.columns([2, 1, 1])
     
     with col2:
-        if st.button("📥 Export to Excel", use_container_width=True, key="export_current_stock"):
+        if st.button("📥 Export to Excel", width='stretch', key="export_current_stock"):
             export_to_excel(display_df, "current_stock")
     
     # Summary stats
@@ -635,7 +635,7 @@ def show_add_stock_tab(username: str):
         col1, col2, col3 = st.columns([2, 1, 1])
         
         with col3:
-            submitted = st.form_submit_button("✅ Add Stock", type="primary", use_container_width=True)
+            submitted = st.form_submit_button("✅ Add Stock", type="primary", width='stretch')
         
         if submitted:
             # Validate
@@ -772,7 +772,7 @@ def show_adjustments_tab(username: str):
         col1, col2, col3 = st.columns([2, 1, 1])
         
         with col3:
-            submitted = st.form_submit_button("✅ Record Adjustment", type="primary", use_container_width=True)
+            submitted = st.form_submit_button("✅ Record Adjustment", type="primary", width='stretch')
         
         if submitted:
             # Validate
@@ -840,7 +840,7 @@ def show_adjustments_tab(username: str):
             display_df.columns = ['Date', 'Item', 'Type', 'Quantity', 'Reason', 'User']
             display_df['Date'] = pd.to_datetime(display_df['Date']).dt.strftime('%Y-%m-%d')
             
-            st.dataframe(display_df, use_container_width=True, hide_index=True, height=400)
+            st.dataframe(display_df, width='stretch', hide_index=True, height=400)
     else:
         st.info("No adjustments recorded yet")
 
@@ -882,7 +882,7 @@ def show_all_purchase_orders(username: str, is_admin: bool):
         days_back = st.number_input("Days to show", min_value=7, max_value=365, value=30)
     
     with col3:
-        if st.button("🔄 Refresh", use_container_width=True, key="refresh_pos"):
+        if st.button("🔄 Refresh", width='stretch', key="refresh_pos"):
             st.rerun()
     
     # Load POs
@@ -936,7 +936,7 @@ def show_all_purchase_orders(username: str, is_admin: bool):
     
     display_df.rename(columns=column_mapping, inplace=True)
     
-    st.dataframe(display_df, use_container_width=True, hide_index=True, height=500)
+    st.dataframe(display_df, width='stretch', hide_index=True, height=500)
 
     # Export - prepare data for download
     from io import BytesIO
@@ -950,7 +950,7 @@ def show_all_purchase_orders(username: str, is_admin: bool):
         data=output,
         file_name=f"purchase_orders_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        use_container_width=True,
+        width='stretch',
         key="download_pos_excel"
     )
 
@@ -1039,7 +1039,7 @@ def show_create_purchase_order(username: str):
         
         # Submit
         st.markdown("---")
-        submitted = st.form_submit_button("✅ Create PO", type="primary", use_container_width=True)
+        submitted = st.form_submit_button("✅ Create PO", type="primary", width='stretch')
         
         if submitted:
             if supplier_name == "Select Supplier":
@@ -1134,7 +1134,7 @@ def show_alerts_tab(username: str):
                 inplace=True
             )
             
-            st.dataframe(display_df, use_container_width=True, hide_index=True)
+            st.dataframe(display_df, width='stretch', hide_index=True)
     else:
         st.success("✅ All items above reorder level")
     
@@ -1149,7 +1149,7 @@ def show_alerts_tab(username: str):
         days_ahead = st.number_input("Days Ahead", min_value=7, max_value=365, value=30)
     
     with col2:
-        if st.button("🔄 Refresh Alerts", use_container_width=True, key="refresh_alerts"):
+        if st.button("🔄 Refresh Alerts", width='stretch', key="refresh_alerts"):
             st.rerun()
     
     with st.spinner("Loading expiring items..."):
@@ -1189,8 +1189,8 @@ def display_critical(df: pd.DataFrame):
     
     display_df['expiry_date'] = pd.to_datetime(display_df['expiry_date']).dt.strftime('%Y-%m-%d')
     display_df.columns = ['Item', 'Batch', 'Quantity', 'Expiry Date', 'Days Left']
-    
-    st.dataframe(display_df, use_container_width=True, hide_index=True)
+
+    st.dataframe(display_df, width='stretch', hide_index=True)
 
 
 def display_expiring(df: pd.DataFrame):
@@ -1201,8 +1201,8 @@ def display_expiring(df: pd.DataFrame):
     
     display_df['expiry_date'] = pd.to_datetime(display_df['expiry_date']).dt.strftime('%Y-%m-%d')
     display_df.columns = ['Item', 'Batch', 'Quantity', 'Expiry Date', 'Days Left']
-    
-    st.dataframe(display_df, use_container_width=True, hide_index=True)
+
+    st.dataframe(display_df, width='stretch', hide_index=True)
 
 
 # =====================================================
@@ -1243,7 +1243,7 @@ def show_history_tab(username: str, is_admin: bool):
         )
     
     with col4:
-        if st.button("🔄 Refresh", use_container_width=True, key="refresh_history"):
+        if st.button("🔄 Refresh", width='stretch', key="refresh_history"):
             st.rerun()
     
     # Load transactions
@@ -1302,10 +1302,10 @@ def show_history_tab(username: str, is_admin: bool):
     
     display_df.rename(columns=column_mapping, inplace=True)
     
-    st.dataframe(display_df, use_container_width=True, hide_index=True, height=500)
+    st.dataframe(display_df, width='stretch', hide_index=True, height=500)
     
     # Export
-    if st.button("📥 Export to Excel", use_container_width=True, key="export_history"):
+    if st.button("📥 Export to Excel", width='stretch', key="export_history"):
         export_to_excel(display_df, "transaction_history")
 
 
@@ -1355,7 +1355,7 @@ def show_all_master_items():
         )
     
     with col3:
-        if st.button("🔄 Refresh", use_container_width=True, key="refresh_master_items"):
+        if st.button("🔄 Refresh", width='stretch', key="refresh_master_items"):
             st.rerun()
     
     # Load items
@@ -1411,7 +1411,7 @@ def show_all_master_items():
         inplace=True
     )
     
-    st.dataframe(display_df, use_container_width=True, hide_index=True, height=500)
+    st.dataframe(display_df, width='stretch', hide_index=True, height=500)
 
 
 def show_add_master_item(username: str):
@@ -1477,7 +1477,7 @@ def show_add_master_item(username: str):
             notes = st.text_area("Notes", height=80)
         
         st.markdown("---")
-        submitted = st.form_submit_button("✅ Add Item", type="primary", use_container_width=True)
+        submitted = st.form_submit_button("✅ Add Item", type="primary", width='stretch')
         
         if submitted:
             errors = []
@@ -1663,7 +1663,7 @@ def show_edit_master_item(username: str):
         
         col1, col2 = st.columns([3, 1])
         with col2:
-            submitted = st.form_submit_button("💾 Update Item", type="primary", use_container_width=True)
+            submitted = st.form_submit_button("💾 Update Item", type="primary", width='stretch')
         
         if submitted:
             with st.spinner("Updating item..."):
@@ -1760,8 +1760,8 @@ def show_all_suppliers():
     
     display_df['is_active'] = display_df['is_active'].map({True: '✅ Active', False: '❌ Inactive'})
     display_df.columns = ['Supplier Name', 'Contact Person', 'Phone', 'Email', 'Address', 'Status']
-    
-    st.dataframe(display_df, use_container_width=True, hide_index=True)
+
+    st.dataframe(display_df, width='stretch', hide_index=True)
 
 
 def show_add_supplier(username: str):
@@ -1783,7 +1783,7 @@ def show_add_supplier(username: str):
             notes = st.text_area("Notes", height=100)
         
         st.markdown("---")
-        submitted = st.form_submit_button("✅ Add Supplier", type="primary", use_container_width=True)
+        submitted = st.form_submit_button("✅ Add Supplier", type="primary", width='stretch')
         
         if submitted:
             if not supplier_name or len(supplier_name.strip()) < 3:
@@ -1898,10 +1898,10 @@ def show_edit_supplier(username: str):
         col1, col2 = st.columns(2)
 
         with col1:
-            update_submitted = st.form_submit_button("💾 Update Supplier", type="primary", use_container_width=True)
+            update_submitted = st.form_submit_button("💾 Update Supplier", type="primary", width='stretch')
 
         with col2:
-            delete_submitted = st.form_submit_button("🗑️ Delete Supplier", type="secondary", use_container_width=True)
+            delete_submitted = st.form_submit_button("🗑️ Delete Supplier", type="secondary", width='stretch')
 
         if update_submitted:
             # Validation
@@ -2040,7 +2040,7 @@ def show_consumption_analytics():
         module_summary.columns = ['Module', 'Total Quantity', 'Total Cost']
         module_summary['Total Cost'] = module_summary['Total Cost'].apply(lambda x: f"₹{x:,.2f}")
         
-        st.dataframe(module_summary, use_container_width=True, hide_index=True)
+        st.dataframe(module_summary, width='stretch', hide_index=True)
         
         st.markdown("---")
         
@@ -2053,11 +2053,11 @@ def show_consumption_analytics():
         
         display_df['total_cost'] = display_df['total_cost'].apply(lambda x: f"₹{x:,.2f}" if pd.notna(x) else 'N/A')
         display_df.columns = ['Module', 'Item', 'Quantity', 'Unit', 'Total Cost']
-        
-        st.dataframe(display_df, use_container_width=True, hide_index=True)
+
+        st.dataframe(display_df, width='stretch', hide_index=True)
         
         # Export
-        if st.button("📥 Export Report", use_container_width=True, key="export_consumption"):
+        if st.button("📥 Export Report", width='stretch', key="export_consumption"):
             export_to_excel(display_df, "consumption_report")
     else:
         st.info("No consumption data found for selected period")
@@ -2118,7 +2118,7 @@ def show_cost_analysis():
             item_costs = item_costs.sort_values('Total Cost', ascending=False)
             item_costs['Total Cost'] = item_costs['Total Cost'].apply(lambda x: f"₹{x:,.2f}")
             
-            st.dataframe(item_costs, use_container_width=True, hide_index=True)
+            st.dataframe(item_costs, width='stretch', hide_index=True)
     else:
         st.info("No cost data available for selected period")
 
@@ -2191,7 +2191,7 @@ def show_view_categories():
     df_display.columns = [column_mapping.get(col, col) for col in available_columns]
 
     # Display table
-    st.dataframe(df_display, use_container_width=True, hide_index=True)
+    st.dataframe(df_display, width='stretch', hide_index=True)
 
     # Show category usage statistics
     st.markdown("---")
@@ -2204,7 +2204,7 @@ def show_view_categories():
         if 'category' in items_df.columns:
             category_counts = items_df['category'].value_counts().reset_index()
             category_counts.columns = ['Category', 'Number of Items']
-            st.dataframe(category_counts, use_container_width=True, hide_index=True)
+            st.dataframe(category_counts, width='stretch', hide_index=True)
         else:
             st.info("No items assigned to categories yet")
     else:
@@ -2233,7 +2233,7 @@ def show_add_category(username: str):
         )
 
         st.markdown("---")
-        submitted = st.form_submit_button("✅ Add Category", type="primary", use_container_width=True)
+        submitted = st.form_submit_button("✅ Add Category", type="primary", width='stretch')
 
         if submitted:
             # Validation
@@ -2327,10 +2327,10 @@ def show_edit_category(username: str):
         col1, col2 = st.columns(2)
 
         with col1:
-            update_submitted = st.form_submit_button("💾 Update Category", type="primary", use_container_width=True)
+            update_submitted = st.form_submit_button("💾 Update Category", type="primary", width='stretch')
 
         with col2:
-            delete_submitted = st.form_submit_button("🗑️ Delete Category", type="secondary", use_container_width=True)
+            delete_submitted = st.form_submit_button("🗑️ Delete Category", type="secondary", width='stretch')
 
         if update_submitted:
             # Validation

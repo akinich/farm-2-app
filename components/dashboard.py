@@ -96,7 +96,7 @@ def show_dashboard():
     st.markdown("---")
     col1, col2, col3 = st.columns([1, 1, 1])
     with col2:
-        if st.button("🔄 Refresh Dashboard", use_container_width=True):
+        if st.button("🔄 Refresh Dashboard", width='stretch'):
             st.rerun()
 
 
@@ -145,11 +145,11 @@ def show_aquaculture_summary():
     # Quick action buttons
     col1, col2, col3 = st.columns(3)
     with col1:
-        st.button("📊 View Biofloc Data", use_container_width=True, disabled=True)
+        st.button("📊 View Biofloc Data", width='stretch', disabled=True)
     with col2:
-        st.button("🔬 View RAS Data", use_container_width=True, disabled=True)
+        st.button("🔬 View RAS Data", width='stretch', disabled=True)
     with col3:
-        st.button("📝 Log Water Test", use_container_width=True, disabled=True)
+        st.button("📝 Log Water Test", width='stretch', disabled=True)
 
 
 def show_crop_systems_summary():
@@ -217,13 +217,13 @@ def show_crop_systems_summary():
     # Quick action buttons
     col1, col2, col3, col4 = st.columns(4)
     with col1:
-        st.button("🌱 Microgreens", use_container_width=True, disabled=True)
+        st.button("🌱 Microgreens", width='stretch', disabled=True)
     with col2:
-        st.button("💧 Hydroponics", use_container_width=True, disabled=True)
+        st.button("💧 Hydroponics", width='stretch', disabled=True)
     with col3:
-        st.button("🥥 Coco Coir", use_container_width=True, disabled=True)
+        st.button("🥥 Coco Coir", width='stretch', disabled=True)
     with col4:
-        st.button("🌾 Open Field", use_container_width=True, disabled=True)
+        st.button("🌾 Open Field", width='stretch', disabled=True)
 
 
 def show_operations_summary():
@@ -246,9 +246,9 @@ def show_operations_summary():
         ]
         
         df = pd.DataFrame(low_stock)
-        st.dataframe(df, use_container_width=True, hide_index=True)
+        st.dataframe(df, width='stretch', hide_index=True)
         
-        st.button("📦 View Full Inventory", use_container_width=True, disabled=True)
+        st.button("📦 View Full Inventory", width='stretch', disabled=True)
         st.caption("💡 Phase 2: Auto-reorder alerts and supplier integration")
     
     with col2:
@@ -265,9 +265,9 @@ def show_operations_summary():
         ]
         
         df_tasks = pd.DataFrame(tasks)
-        st.dataframe(df_tasks, use_container_width=True, hide_index=True)
+        st.dataframe(df_tasks, width='stretch', hide_index=True)
         
-        st.button("✅ View All Tasks", use_container_width=True, disabled=True)
+        st.button("✅ View All Tasks", width='stretch', disabled=True)
         st.caption("💡 Phase 2: Priority system and photo completion tracking")
     
     st.markdown("---")
@@ -279,11 +279,11 @@ def show_operations_summary():
         
         col1, col2, col3 = st.columns(3)
         with col1:
-            st.button("🗄️ Database Editor", use_container_width=True, disabled=True)
+            st.button("🗄️ Database Editor", width='stretch', disabled=True)
         with col2:
-            st.button("📥 Export Tables", use_container_width=True, disabled=True)
+            st.button("📥 Export Tables", width='stretch', disabled=True)
         with col3:
-            st.button("🔧 System Settings", use_container_width=True, disabled=True)
+            st.button("🔧 System Settings", width='stretch', disabled=True)
         
         st.caption("💡 Phase 2: View/edit/download any table as Excel")
 
@@ -306,7 +306,7 @@ def show_recent_activity():
             # Format timestamp
             display_df['Time'] = pd.to_datetime(display_df['Time'], errors='coerce').dt.strftime('%Y-%m-%d %H:%M')
             
-            st.dataframe(display_df, use_container_width=True, hide_index=True, height=400)
+            st.dataframe(display_df, width='stretch', hide_index=True, height=400)
         else:
             st.info("Activity log format differs from expected. Check database schema.")
     else:
@@ -321,7 +321,7 @@ def show_recent_activity():
     
     # Export activity log
     if SessionManager.is_admin():
-        if st.button("📥 Export Activity Log", use_container_width=True):
+        if st.button("📥 Export Activity Log", width='stretch'):
             if logs:
                 df_export = pd.DataFrame(logs)
                 csv = df_export.to_csv(index=False)

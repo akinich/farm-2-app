@@ -36,7 +36,7 @@ def show_login_page():
             with st.form("login_form"):
                 email = st.text_input("Email", placeholder="your.email@farm.com")
                 password = st.text_input("Password", type="password")
-                submit = st.form_submit_button("Login", use_container_width=True, type="primary")
+                submit = st.form_submit_button("Login", width='stretch', type="primary")
 
                 if submit:
                     if not email or not password:
@@ -48,7 +48,7 @@ def show_login_page():
             st.markdown("---")
             col_a, col_b, col_c = st.columns([1, 1, 1])
             with col_b:
-                if st.button("🔑 Forgot Password?", use_container_width=True):
+                if st.button("🔑 Forgot Password?", width='stretch'):
                     st.session_state.show_forgot_password = True
                     st.rerun()
 
@@ -61,7 +61,7 @@ def show_forgot_password_form():
 
     with st.form("forgot_password_form"):
         email = st.text_input("Email Address", placeholder="your.email@farm.com")
-        submit = st.form_submit_button("Send Reset Link", use_container_width=True, type="primary")
+        submit = st.form_submit_button("Send Reset Link", width='stretch', type="primary")
 
         if submit:
             if not email:
@@ -71,7 +71,7 @@ def show_forgot_password_form():
 
     # Back to login link
     st.markdown("---")
-    if st.button("← Back to Login", use_container_width=True):
+    if st.button("← Back to Login", width='stretch'):
         st.session_state.show_forgot_password = False
         st.rerun()
 
@@ -131,7 +131,7 @@ def show_password_reset_form(recovery_token: str):
         new_password = st.text_input("New Password", type="password",
                                      help="Minimum 6 characters")
         confirm_password = st.text_input("Confirm New Password", type="password")
-        submit = st.form_submit_button("Reset Password", use_container_width=True, type="primary")
+        submit = st.form_submit_button("Reset Password", width='stretch', type="primary")
 
         if submit:
             if not new_password or not confirm_password:
@@ -191,7 +191,7 @@ def handle_login(email: str, password: str):
 
 def show_logout_button():
     """Display logout button in sidebar"""
-    if st.sidebar.button("🚪 Logout", use_container_width=True):
+    if st.sidebar.button("🚪 Logout", width='stretch'):
         SessionManager.logout()
         st.rerun()
 

@@ -263,106 +263,194 @@ class UserDB:
     
     @staticmethod
     def create_user(email: str, full_name: str, role_id: int) -> bool:
-       """
-       Create user with auto-confirmed email (workaround for restricted Supabase Auth)
-       NO SUPABASE DASHBOARD ACCESS NEEDED
-       """
-       try:
-           db = Database.get_client()
-        
-           # Generate secure temporary password
-           temp_password = ''.join(
-               secrets.choice(string.ascii_letters + string.digits + string.punctuation) 
-               for _ in range(20)
-           )
-        
-           # Create user with AUTO-CONFIRMED email (bypasses restrictions)
-           try:
-               auth_response = db.auth.admin.create_user({
-                   "email": email,
-                   "password": temp_password,
-                   "email_confirm": True,  # ← KEY CHANGE: True instead of False
-                   "user_metadata": {
-                       "full_name": full_name
-                   }
-               })
-           except Exception as auth_error:
-               error_msg = str(auth_error)
-               error_msg_lower = error_msg.lower()
+        """
+        Create user with SQL fallback (works with Supabase default email)
+        Tries Auth API first, falls back to direct SQL if blocked
+        """
+        try:
+            db = Database.get_client()
 
-               # Detailed error logging
-               st.error(f"❌ Auth error: {error_msg}")
+            # Generate secure temporary password
+            temp_password = ''.join(
+                secrets.choice(string.ascii_letters + string.digits + string.punctuation)
+                for _ in range(20)
+            )
 
-               if "already registered" in error_msg_lower or "already exists" in error_msg_lower:
-                   st.info("This email is already registered in the system")
-                   return False
-               elif "invalid email" in error_msg_lower:
-                   st.info(f"The email format appears to be invalid: {email}")
-                   return False
-               elif "user not allowed" in error_msg_lower or "not allowed" in error_msg_lower:
-                   st.error("🔒 User creation blocked by Supabase Auth settings")
-                   st.info("""
-**To fix this:**
-1. Go to Supabase Dashboard → **Authentication** → **Providers**
-2. Click on **Email** provider
-3. Make sure **Enable Email provider** is ON
-4. Under **Confirm email**, set it to **Disabled** (or enable auto-confirmation)
-5. Go to **Settings** tab
-6. Make sure **Enable email signups** is ON
-7. Click **Save**
-                   """)
-                   return False
-               else:
-                   st.warning("Check Supabase Auth configuration")
-                   return False
-        
-           if not auth_response.user:
-               st.error("❌ Failed to create user")
-               return False
-        
-           user_id = auth_response.user.id
-        
-           # Create user profile
-           profile_data = {
-               'id': user_id,
-               'full_name': full_name,
-               'role_id': role_id,
-               'is_active': True
-           }
-        
-           try:
-               profile_response = db.table('user_profiles').insert(profile_data).execute()
-            
-               if not profile_response.data:
-                   st.error("❌ Failed to create profile")
-                   try:
-                       db.auth.admin.delete_user(user_id)
-                   except:
-                       pass
-                   return False
-           except Exception as profile_error:
-               st.error(f"❌ Profile error: {str(profile_error)}")
-               try:
-                   db.auth.admin.delete_user(user_id)
-               except:
-                   pass
-               return False
-        
-           # Success!
-           st.success("✅ User created successfully!")
-           st.success(f"🔓 User can login immediately")
-        
-           # Show temporary password
-           with st.expander("🔑 Temporary Password (click to view)", expanded=False):
-               st.code(temp_password, language=None)
-               st.warning("⚠️ Share this password with the user securely")
-               st.info("💡 User should change password after first login")
-        
-           return True
-        
-       except Exception as e:
-           st.error(f"❌ Error: {str(e)}")
-           return False
+            # Try Auth API first
+            auth_response = None
+            try:
+                auth_response = db.auth.admin.create_user({
+                    "email": email,
+                    "password": temp_password,
+                    "email_confirm": True,
+                    "user_metadata": {
+                        "full_name": full_name
+                    }
+                })
+            except Exception as auth_error:
+                error_msg = str(auth_error)
+                error_msg_lower = error_msg.lower()
+
+                # Check for specific errors
+                if "already registered" in error_msg_lower or "already exists" in error_msg_lower:
+                    st.error("❌ This email is already registered")
+                    return False
+                elif "invalid email" in error_msg_lower:
+                    st.error(f"❌ Invalid email format: {email}")
+                    return False
+                elif "user not allowed" in error_msg_lower or "not allowed" in error_msg_lower:
+                    # Supabase default email blocks admin.create_user - use SQL fallback
+                    st.info("⚙️ Using direct SQL user creation (Supabase default email detected)...")
+                    return UserDB._create_user_sql(db, email, temp_password, full_name, role_id)
+                else:
+                    st.error(f"❌ Auth error: {error_msg}")
+                    st.info("⚙️ Trying SQL fallback...")
+                    return UserDB._create_user_sql(db, email, temp_password, full_name, role_id)
+
+            # Auth API succeeded
+            if auth_response and auth_response.user:
+                user_id = auth_response.user.id
+
+                # Create user profile
+                profile_data = {
+                    'id': user_id,
+                    'full_name': full_name,
+                    'role_id': role_id,
+                    'is_active': True
+                }
+
+                try:
+                    profile_response = db.table('user_profiles').insert(profile_data).execute()
+
+                    if not profile_response.data:
+                        st.error("❌ Failed to create profile")
+                        try:
+                            db.auth.admin.delete_user(user_id)
+                        except:
+                            pass
+                        return False
+                except Exception as profile_error:
+                    st.error(f"❌ Profile error: {str(profile_error)}")
+                    try:
+                        db.auth.admin.delete_user(user_id)
+                    except:
+                        pass
+                    return False
+
+                # Success!
+                st.success("✅ User created successfully!")
+                st.success(f"🔓 User can login immediately")
+
+                # Show temporary password
+                with st.expander("🔑 Temporary Password (click to view)", expanded=False):
+                    st.code(temp_password, language=None)
+                    st.warning("⚠️ Share this password with the user securely")
+                    st.info("💡 User should change password after first login")
+
+                return True
+            else:
+                st.error("❌ Failed to create user")
+                return False
+
+        except Exception as e:
+            st.error(f"❌ Unexpected error: {str(e)}")
+            return False
+
+    @staticmethod
+    def _create_user_sql(db, email: str, password: str, full_name: str, role_id: int) -> bool:
+        """
+        Create user directly via SQL (bypasses Auth API restrictions)
+        Used when Supabase default email blocks admin.create_user()
+        """
+        try:
+            # Execute SQL to create auth user and profile
+            result = db.rpc('create_user_with_password', {
+                'user_email': email,
+                'user_password': password,
+                'user_full_name': full_name,
+                'user_role_id': role_id
+            }).execute()
+
+            if result.data:
+                st.success("✅ User created successfully via SQL!")
+                st.success("🔓 User can login immediately")
+
+                # Show temporary password
+                with st.expander("🔑 Temporary Password (click to view)", expanded=False):
+                    st.code(password, language=None)
+                    st.warning("⚠️ Share this password with the user securely")
+                    st.info("💡 User should change password after first login")
+
+                return True
+            else:
+                st.error("❌ SQL user creation failed")
+                return False
+
+        except Exception as sql_error:
+            error_msg = str(sql_error)
+            if "function" in error_msg.lower() and "does not exist" in error_msg.lower():
+                st.error("❌ SQL function not found")
+                st.info("""
+**To enable SQL user creation:**
+Run this SQL in Supabase SQL Editor, then try again:
+
+```sql
+CREATE OR REPLACE FUNCTION create_user_with_password(
+    user_email TEXT,
+    user_password TEXT,
+    user_full_name TEXT,
+    user_role_id INT
+)
+RETURNS UUID
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+    new_user_id UUID;
+BEGIN
+    -- Create auth user
+    INSERT INTO auth.users (
+        instance_id,
+        id,
+        aud,
+        role,
+        email,
+        encrypted_password,
+        email_confirmed_at,
+        confirmed_at,
+        created_at,
+        updated_at,
+        raw_app_meta_data,
+        raw_user_meta_data
+    ) VALUES (
+        '00000000-0000-0000-0000-000000000000',
+        gen_random_uuid(),
+        'authenticated',
+        'authenticated',
+        user_email,
+        crypt(user_password, gen_salt('bf')),
+        now(),
+        now(),
+        now(),
+        now(),
+        '{"provider":"email","providers":["email"]}'::jsonb,
+        json_build_object('full_name', user_full_name)::jsonb
+    )
+    RETURNING id INTO new_user_id;
+
+    -- Create user profile
+    INSERT INTO user_profiles (id, full_name, role_id, is_active)
+    VALUES (new_user_id, user_full_name, user_role_id, true);
+
+    RETURN new_user_id;
+END;
+$$;
+```
+                """)
+                return False
+            else:
+                st.error(f"❌ SQL error: {error_msg}")
+                return False
     
     @staticmethod
     def update_user(user_id: str, full_name: str, role_id: int, is_active: bool) -> bool:
