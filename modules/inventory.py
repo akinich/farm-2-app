@@ -564,19 +564,10 @@ def show_add_stock_tab(username: str):
                 default_supplier_name = supplier['supplier_name']
                 break
 
-    # Track which item we're currently looking at
-    if 'add_stock_current_item_id' not in st.session_state:
-        st.session_state.add_stock_current_item_id = selected_item['id']
-        st.session_state.add_stock_default_supplier = default_supplier_name
-    elif st.session_state.add_stock_current_item_id != selected_item['id']:
-        # Item changed, update the default supplier
-        st.session_state.add_stock_current_item_id = selected_item['id']
-        st.session_state.add_stock_default_supplier = default_supplier_name
-
-    # Find index for the default supplier
+    # Find index for the default supplier in the list
     default_index = 0
-    if st.session_state.add_stock_default_supplier in supplier_list:
-        default_index = supplier_list.index(st.session_state.add_stock_default_supplier)
+    if default_supplier_name in supplier_list:
+        default_index = supplier_list.index(default_supplier_name)
 
     with st.form("add_stock_form", clear_on_submit=True):
         col1, col2 = st.columns(2)
