@@ -172,6 +172,7 @@ import pandas as pd
 from datetime import datetime, date, timedelta
 from typing import List, Dict, Optional
 import time
+from io import BytesIO
 
 # Import from your app structure
 from auth.session import SessionManager
