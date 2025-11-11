@@ -198,7 +198,7 @@ def show():
     """Main entry point for the Inventory Management module"""
     
     # Check module access
-    SessionManager.require_module_access('inventory_management')
+    SessionManager.require_module_access('inventory')
     
     # Get user info
     user = SessionManager.get_user()
@@ -682,7 +682,7 @@ def show_add_stock_tab(username: str):
                     ActivityLogger.log(
                         user_id=st.session_state.user['id'],
                         action_type='add_stock',
-                        module_key='inventory_management',
+                        module_key='inventory',
                         description=f"Added stock: {selected_item['item_name']} (Batch: {batch_number})",
                         metadata={
                             'item': selected_item['item_name'],
@@ -816,7 +816,7 @@ def show_adjustments_tab(username: str):
                     ActivityLogger.log(
                         user_id=st.session_state.user['id'],
                         action_type='adjustment',
-                        module_key='inventory_management',
+                        module_key='inventory',
                         description=f"Stock adjustment: {selected_item['item_name']} ({adjustment_type})",
                         metadata={
                             'item': selected_item['item_name'],
@@ -1080,7 +1080,7 @@ def show_create_purchase_order(username: str):
                     ActivityLogger.log(
                         user_id=st.session_state.user['id'],
                         action_type='create_po',
-                        module_key='inventory_management',
+                        module_key='inventory',
                         description=f"Created PO: {po_number_input} by {full_name}",
                         metadata={'po_number': po_number_input, 'item': selected_item_name},
                         user_email=st.session_state.user.get('email')
@@ -1529,7 +1529,7 @@ def show_add_master_item(username: str):
                 ActivityLogger.log(
                     user_id=st.session_state.user['id'],
                     action_type='add_master_item',
-                    module_key='inventory_management',
+                    module_key='inventory',
                     description=f"Added master item: {item_name}",
                     metadata={
                         'item_name': item_name,
@@ -1694,7 +1694,7 @@ def show_edit_master_item(username: str):
                 ActivityLogger.log(
                     user_id=st.session_state.user['id'],
                     action_type='update_master_item',
-                    module_key='inventory_management',
+                    module_key='inventory',
                     description=f"Updated master item: {item_name}",
                     metadata={
                         'item_name': item_name,
@@ -1812,7 +1812,7 @@ def show_add_supplier(username: str):
                     ActivityLogger.log(
                         user_id=st.session_state.user['id'],
                         action_type='add_supplier',
-                        module_key='inventory_management',
+                        module_key='inventory',
                         description=f"Added supplier: {supplier_name}"
                     )
                     
@@ -1939,7 +1939,7 @@ def show_edit_supplier(username: str):
                     ActivityLogger.log(
                         user_id=st.session_state.user['id'],
                         action_type='update_supplier',
-                        module_key='inventory_management',
+                        module_key='inventory',
                         description=f"Updated supplier: {selected_supplier['supplier_name']} → {supplier_name}",
                         metadata={
                             'supplier_id': selected_supplier['id'],
@@ -1965,7 +1965,7 @@ def show_edit_supplier(username: str):
                     ActivityLogger.log(
                         user_id=st.session_state.user['id'],
                         action_type='delete_supplier',
-                        module_key='inventory_management',
+                        module_key='inventory',
                         description=f"Deleted supplier: {selected_supplier['supplier_name']}",
                         metadata={'supplier_name': selected_supplier['supplier_name']}
                     )
@@ -2392,7 +2392,7 @@ def show_add_category(username: str):
                     ActivityLogger.log(
                         user_id=st.session_state.user['id'],
                         action_type='add_category',
-                        module_key='inventory_management',
+                        module_key='inventory',
                         description=f"Added category: {category_name}",
                         metadata={'category_name': category_name}
                     )
@@ -2488,7 +2488,7 @@ def show_edit_category(username: str):
                     ActivityLogger.log(
                         user_id=st.session_state.user['id'],
                         action_type='update_category',
-                        module_key='inventory_management',
+                        module_key='inventory',
                         description=f"Updated category: {selected_category['category_name']} → {new_category_name}",
                         metadata={
                             'old_name': selected_category['category_name'],
@@ -2513,7 +2513,7 @@ def show_edit_category(username: str):
                     ActivityLogger.log(
                         user_id=st.session_state.user['id'],
                         action_type='delete_category',
-                        module_key='inventory_management',
+                        module_key='inventory',
                         description=f"Deleted category: {selected_category['category_name']}",
                         metadata={'category_name': selected_category['category_name']}
                     )
