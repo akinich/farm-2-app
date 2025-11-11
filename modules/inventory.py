@@ -1150,47 +1150,131 @@ def show_po_details(po: Dict, is_admin: bool, username: str):
     with action_col3:
         st.markdown("**📄 Export PO**")
 
-        # Prepare single PO export
-        po_export_data = {
-            'PO Number': po_full.get('po_number', 'N/A'),
-            'Status': po_full.get('status', 'N/A'),
-            'PO Date': po_full.get('po_date', 'N/A'),
-            'Expected Delivery': po_full.get('expected_delivery', 'N/A'),
-            'Supplier': po_full.get('supplier_name', 'N/A'),
-            'Supplier Contact': po_full.get('supplier_contact', 'N/A'),
-            'Supplier Phone': po_full.get('supplier_phone', 'N/A'),
-            'Created By': po_full.get('created_by_name', 'Unknown')
-        }
+        # Prepare single PO export - OPTIMIZED: Single sheet with all data
+        items = po_full.get('items', [])
 
+        # Combine PO header info with items in one sheet
+        export_rows = []
+
+        # Add header rows first
+        export_rows.append({
+            'Section': 'PO HEADER',
+            'Field': 'PO Number',
+            'Value': po_full.get('po_number', 'N/A'),
+            'Item': '',
+            'Quantity': '',
+            'Unit': '',
+            'Unit Cost': '',
+            'Total': ''
+        })
+        export_rows.append({
+            'Section': 'PO HEADER',
+            'Field': 'Status',
+            'Value': po_full.get('status', 'N/A'),
+            'Item': '',
+            'Quantity': '',
+            'Unit': '',
+            'Unit Cost': '',
+            'Total': ''
+        })
+        export_rows.append({
+            'Section': 'PO HEADER',
+            'Field': 'PO Date',
+            'Value': str(po_full.get('po_date', 'N/A')),
+            'Item': '',
+            'Quantity': '',
+            'Unit': '',
+            'Unit Cost': '',
+            'Total': ''
+        })
+        export_rows.append({
+            'Section': 'PO HEADER',
+            'Field': 'Expected Delivery',
+            'Value': str(po_full.get('expected_delivery', 'N/A')),
+            'Item': '',
+            'Quantity': '',
+            'Unit': '',
+            'Unit Cost': '',
+            'Total': ''
+        })
+        export_rows.append({
+            'Section': 'PO HEADER',
+            'Field': 'Supplier',
+            'Value': po_full.get('supplier_name', 'N/A'),
+            'Item': '',
+            'Quantity': '',
+            'Unit': '',
+            'Unit Cost': '',
+            'Total': ''
+        })
+        export_rows.append({
+            'Section': 'PO HEADER',
+            'Field': 'Created By',
+            'Value': po_full.get('created_by_name', 'Unknown'),
+            'Item': '',
+            'Quantity': '',
+            'Unit': '',
+            'Unit Cost': '',
+            'Total': ''
+        })
+
+        # Add blank row
+        export_rows.append({
+            'Section': '',
+            'Field': '',
+            'Value': '',
+            'Item': '',
+            'Quantity': '',
+            'Unit': '',
+            'Unit Cost': '',
+            'Total': ''
+        })
+
+        # Add items section
+        if items:
+            for item in items:
+                item_cost = item.get('unit_cost', 0) if is_admin else ''
+                item_total = item.get('ordered_qty', 0) * item.get('unit_cost', 0) if is_admin else ''
+
+                export_rows.append({
+                    'Section': 'ITEMS',
+                    'Field': '',
+                    'Value': '',
+                    'Item': item.get('item_name', 'N/A'),
+                    'Quantity': item.get('ordered_qty', 0),
+                    'Unit': item.get('unit', ''),
+                    'Unit Cost': f"₹{item_cost:,.2f}" if is_admin and item_cost else '',
+                    'Total': f"₹{item_total:,.2f}" if is_admin and item_total else ''
+                })
+
+        # Add totals if admin
         if is_admin:
-            po_export_data['Total Cost'] = f"₹{po_full.get('total_cost', 0):,.2f}"
+            export_rows.append({
+                'Section': '',
+                'Field': '',
+                'Value': '',
+                'Item': '',
+                'Quantity': '',
+                'Unit': '',
+                'Unit Cost': '',
+                'Total': ''
+            })
+            export_rows.append({
+                'Section': 'TOTALS',
+                'Field': 'Grand Total',
+                'Value': f"₹{po_full.get('total_cost', 0):,.2f}",
+                'Item': '',
+                'Quantity': po_full.get('total_quantity', 0),
+                'Unit': '',
+                'Unit Cost': '',
+                'Total': ''
+            })
 
-        if po_full.get('notes'):
-            po_export_data['Notes'] = po_full.get('notes')
-
-        # Create Excel with PO header and items
+        # Create Excel with single sheet
         output = BytesIO()
         with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-            # Header sheet
-            pd.DataFrame([po_export_data]).to_excel(writer, sheet_name='PO Details', index=False)
-
-            # Items sheet
-            if items:
-                items_export = []
-                for item in items:
-                    item_data = {
-                        'Item Name': item.get('item_name', 'N/A'),
-                        'SKU': item.get('sku', 'N/A'),
-                        'Quantity': item.get('ordered_qty', 0),
-                        'Unit': item.get('unit', '')
-                    }
-                    if is_admin:
-                        item_data['Unit Cost'] = item.get('unit_cost', 0)
-                        item_data['Total Cost'] = item.get('ordered_qty', 0) * item.get('unit_cost', 0)
-
-                    items_export.append(item_data)
-
-                pd.DataFrame(items_export).to_excel(writer, sheet_name='Items', index=False)
+            df = pd.DataFrame(export_rows)
+            df.to_excel(writer, sheet_name='Purchase Order', index=False)
 
         output.seek(0)
 
