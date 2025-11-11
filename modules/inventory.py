@@ -1006,7 +1006,7 @@ def show_all_purchase_orders(username: str, is_admin: bool):
         data=excel_data,
         file_name=f"purchase_orders_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        use_container_width=True,
+        width='stretch',
         key="download_all_pos_excel"
     )
 
@@ -1018,9 +1018,7 @@ def show_all_purchase_orders(username: str, is_admin: bool):
         with st.expander(
             f"📄 **{po.get('po_number', 'N/A')}** | {get_status_badge(po.get('status', 'pending'))} | "
             f"{po.get('supplier_name', 'N/A')} | {po.get('item_name', 'N/A')} | "
-            f"₹{po.get('total_cost', 0):,.2f}" if is_admin else
-            f"📄 **{po.get('po_number', 'N/A')}** | {get_status_badge(po.get('status', 'pending'))} | "
-            f"{po.get('supplier_name', 'N/A')} | {po.get('item_name', 'N/A')}",
+            f"₹{po.get('total_cost', 0):,.2f}",
             expanded=False
         ):
             show_po_details(po, is_admin, username)
@@ -1060,9 +1058,8 @@ def show_po_details(po: Dict, is_admin: bool, username: str):
     with col3:
         st.markdown("#### 💰 Summary")
         st.markdown(f"**Total Items:** {len(po_full.get('items', []))}")
-        if is_admin:
-            st.markdown(f"**Total Quantity:** {po_full.get('total_quantity', 0):.2f}")
-            st.markdown(f"**Total Cost:** ₹{po_full.get('total_cost', 0):,.2f}")
+        st.markdown(f"**Total Quantity:** {po_full.get('total_quantity', 0):.2f}")
+        st.markdown(f"**Total Cost:** ₹{po_full.get('total_cost', 0):,.2f}")
 
         if po_full.get('notes'):
             st.markdown(f"**Notes:** {po_full.get('notes')}")
@@ -1079,12 +1076,10 @@ def show_po_details(po: Dict, is_admin: bool, username: str):
             item_row = {
                 'Item Name': item.get('item_name', 'N/A'),
                 'SKU': item.get('sku', 'N/A'),
-                'Quantity': f"{item.get('ordered_qty', 0):.2f} {item.get('unit', '')}"
+                'Quantity': f"{item.get('ordered_qty', 0):.2f} {item.get('unit', '')}",
+                'Unit Cost': f"₹{item.get('unit_cost', 0):.2f}",
+                'Total': f"₹{item.get('ordered_qty', 0) * item.get('unit_cost', 0):,.2f}"
             }
-            if is_admin:
-                item_row['Unit Cost'] = f"₹{item.get('unit_cost', 0):.2f}"
-                item_row['Total'] = f"₹{item.get('ordered_qty', 0) * item.get('unit_cost', 0):,.2f}"
-
             items_data.append(item_row)
 
         st.dataframe(pd.DataFrame(items_data), hide_index=True, width='stretch')
@@ -1233,8 +1228,8 @@ def show_po_details(po: Dict, is_admin: bool, username: str):
         # Add items section
         if items:
             for item in items:
-                item_cost = item.get('unit_cost', 0) if is_admin else ''
-                item_total = item.get('ordered_qty', 0) * item.get('unit_cost', 0) if is_admin else ''
+                item_cost = item.get('unit_cost', 0)
+                item_total = item.get('ordered_qty', 0) * item.get('unit_cost', 0)
 
                 export_rows.append({
                     'Section': 'ITEMS',
@@ -1243,32 +1238,31 @@ def show_po_details(po: Dict, is_admin: bool, username: str):
                     'Item': item.get('item_name', 'N/A'),
                     'Quantity': item.get('ordered_qty', 0),
                     'Unit': item.get('unit', ''),
-                    'Unit Cost': f"₹{item_cost:,.2f}" if is_admin and item_cost else '',
-                    'Total': f"₹{item_total:,.2f}" if is_admin and item_total else ''
+                    'Unit Cost': f"₹{item_cost:,.2f}",
+                    'Total': f"₹{item_total:,.2f}"
                 })
 
-        # Add totals if admin
-        if is_admin:
-            export_rows.append({
-                'Section': '',
-                'Field': '',
-                'Value': '',
-                'Item': '',
-                'Quantity': '',
-                'Unit': '',
-                'Unit Cost': '',
-                'Total': ''
-            })
-            export_rows.append({
-                'Section': 'TOTALS',
-                'Field': 'Grand Total',
-                'Value': f"₹{po_full.get('total_cost', 0):,.2f}",
-                'Item': '',
-                'Quantity': po_full.get('total_quantity', 0),
-                'Unit': '',
-                'Unit Cost': '',
-                'Total': ''
-            })
+        # Add totals row
+        export_rows.append({
+            'Section': '',
+            'Field': '',
+            'Value': '',
+            'Item': '',
+            'Quantity': '',
+            'Unit': '',
+            'Unit Cost': '',
+            'Total': ''
+        })
+        export_rows.append({
+            'Section': 'TOTALS',
+            'Field': 'Grand Total',
+            'Value': f"₹{po_full.get('total_cost', 0):,.2f}",
+            'Item': '',
+            'Quantity': po_full.get('total_quantity', 0),
+            'Unit': '',
+            'Unit Cost': '',
+            'Total': ''
+        })
 
         # Create Excel with single sheet
         output = BytesIO()
@@ -1386,7 +1380,7 @@ def show_create_purchase_order(username: str):
 
     with item_col4:
         st.markdown("&nbsp;")
-        if st.button("➕ Add", key="add_item_btn", use_container_width=True):
+        if st.button("➕ Add", key="add_item_btn", width='stretch'):
             # Add item to cart
             new_item = {
                 'item_master_id': selected_item['id'],
@@ -1398,7 +1392,7 @@ def show_create_purchase_order(username: str):
                 'total': quantity * unit_cost
             }
             st.session_state.po_items.append(new_item)
-            st.rerun()
+            # Removed st.rerun() - Streamlit will auto-update
 
     # Display Added Items
     if st.session_state.po_items:
@@ -1438,7 +1432,7 @@ def show_create_purchase_order(username: str):
         st.dataframe(
             df_display.drop('Action', axis=1),
             hide_index=True,
-            use_container_width=True
+            width='stretch'
         )
 
         # Delete buttons
@@ -1448,19 +1442,19 @@ def show_create_purchase_order(username: str):
             with delete_cols[idx % 5]:
                 if st.button(f"🗑️ #{idx+1}", key=f"delete_{idx}"):
                     st.session_state.po_items.pop(idx)
-                    st.rerun()
+                    # Removed st.rerun() - Streamlit will auto-update
 
         # Action buttons
         st.markdown("---")
         action_col1, action_col2, action_col3 = st.columns([1, 1, 2])
 
         with action_col1:
-            if st.button("🗑️ Clear All", use_container_width=True):
+            if st.button("🗑️ Clear All", width='stretch'):
                 st.session_state.po_items = []
-                st.rerun()
+                # Removed st.rerun() - Streamlit will auto-update
 
         with action_col2:
-            if st.button("✅ Create PO", type="primary", use_container_width=True):
+            if st.button("✅ Create PO", type="primary", width='stretch'):
                 # Validate
                 if not po_number or len(po_number.strip()) < 3:
                     st.error("❌ PO number is required")
