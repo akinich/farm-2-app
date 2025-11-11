@@ -525,9 +525,9 @@ def show_current_stock_tab(username: str, is_admin: bool):
 
 def show_add_stock_tab(username: str):
     """Add new stock entry with batch tracking"""
-    
+
     st.markdown("### ➕ Add New Stock")
-    
+
     # Get master items for dropdown
     master_items = InventoryDB.get_all_master_items(active_only=True)
     for item in master_items:
@@ -535,62 +535,90 @@ def show_add_stock_tab(username: str):
             item['reorder_level'] = item['reorder_threshold']
         if 'default_supplier_id' not in item and 'supplier_id' in item:
             item['default_supplier_id'] = item['supplier_id']
-    
+
     if not master_items:
         st.warning("⚠️ No active items in master list. Ask admin to add items first.")
         return
-    
+
     st.info("📝 Add stock received from suppliers. Each entry creates a new batch for FIFO tracking.")
-    
+
+    # Item selection OUTSIDE form so it can update dynamically
+    item_options = {
+        f"{item['item_name']} ({item.get('category', 'N/A')}) - Current: {item.get('current_qty', 0)} {item.get('unit', '')}": item
+        for item in master_items
+    }
+
+    selected_item_key = st.selectbox(
+        "Select Item *",
+        options=list(item_options.keys()),
+        help="Search and select item from master list",
+        key="add_stock_item_select_main"
+    )
+    selected_item = item_options[selected_item_key]
+
+    # Show item details (updates when item changes)
+    with st.expander("ℹ️ Item Details", expanded=True):
+        col_a, col_b, col_c = st.columns(3)
+        with col_a:
+            st.markdown(f"**Category:** {selected_item.get('category', 'N/A')}")
+            st.markdown(f"**SKU:** {selected_item.get('sku', 'N/A')}")
+        with col_b:
+            st.markdown(f"**Brand:** {selected_item.get('brand', 'N/A')}")
+            st.markdown(f"**Unit:** {selected_item.get('unit', 'N/A')}")
+        with col_c:
+            st.markdown(f"**Current Stock:** {selected_item.get('current_qty', 0)} {selected_item.get('unit', '')}")
+            st.markdown(f"**Reorder Level:** {selected_item.get('reorder_level', 0)}")
+
+    # Get suppliers for dropdown
+    suppliers = InventoryDB.get_all_suppliers(active_only=True)
+    supplier_options = {s['supplier_name']: s['id'] for s in suppliers}
+
+    # Find default supplier index
+    default_supplier_name = None
+    if selected_item.get('default_supplier_id'):
+        for supplier in suppliers:
+            if supplier['id'] == selected_item['default_supplier_id']:
+                default_supplier_name = supplier['supplier_name']
+                break
+
+    # Build supplier dropdown list
+    supplier_list = ["Select Supplier"] + list(supplier_options.keys())
+    default_supplier_index = 0
+    if default_supplier_name and default_supplier_name in supplier_list:
+        default_supplier_index = supplier_list.index(default_supplier_name)
+
     with st.form("add_stock_form", clear_on_submit=True):
         col1, col2 = st.columns(2)
-        
+
         with col1:
-            # Item selection with search
-            item_options = {
-                f"{item['item_name']} ({item.get('category', 'N/A')}) - Current: {item.get('current_qty', 0)} {item.get('unit', '')}": item
-                for item in master_items
-            }
-            
-            selected_item_key = st.selectbox(
-                "Select Item *",
-                options=list(item_options.keys()),
-                help="Search and select item from master list",
-                key="add_stock_item_select"
-            )
-            selected_item = item_options[selected_item_key]
-            
-            # Show item details
-            with st.expander("ℹ️ Item Details"):
-                st.markdown(f"**Category:** {selected_item.get('category', 'N/A')}")
-                st.markdown(f"**SKU:** {selected_item.get('sku', 'N/A')}")
-                st.markdown(f"**Brand:** {selected_item.get('brand', 'N/A')}")
-                st.markdown(f"**Current Stock:** {selected_item.get('current_qty', 0)} {selected_item.get('unit', '')}")
-                st.markdown(f"**Reorder Level:** {selected_item.get('reorder_level', 0)}")
-            
             # Batch details
             batch_number = st.text_input(
                 "Batch Number *",
                 placeholder="e.g., BATCH-2024-001",
                 help="Unique identifier for this batch"
             )
-            
+
+            # Get unit for display
+            unit = selected_item.get('unit', 'units')
+
             quantity = st.number_input(
-                "Quantity *",
+                f"Quantity ({unit}) *",
                 min_value=0.01,
-                step=0.01,
+                value=1.0,
+                step=1.0,
                 format="%.2f",
-                help=f"Amount received in {selected_item.get('unit', '')}"
+                help=f"Amount received in {unit}"
             )
-            
+
             unit_cost = st.number_input(
-                "Unit Cost (₹) *",
+                f"Unit Cost (₹ per {unit}) *",
                 min_value=0.01,
-                step=0.01,
+                value=1.0,
+                step=1.0,
                 format="%.2f",
                 help="Cost per unit (for cost tracking)"
             )
-        
+
         with col2:
             # Purchase details
             purchase_date = st.date_input(
@@ -598,24 +626,21 @@ def show_add_stock_tab(username: str):
                 value=date.today(),
                 max_value=date.today()
             )
-            
-            # Get suppliers for dropdown
-            suppliers = InventoryDB.get_all_suppliers(active_only=True)
-            supplier_options = ["Select Supplier"] + [s['supplier_name'] for s in suppliers]
-            
+
             supplier_name = st.selectbox(
                 "Supplier",
-                options=supplier_options,
-                help="Select supplier (optional)",
-                key="add_stock_supplier_select"
+                options=supplier_list,
+                index=default_supplier_index,
+                help="Select supplier (pre-filled with default if set)",
+                key="add_stock_supplier_select_form"
             )
-            
+
             if supplier_name == "Select Supplier":
                 supplier_name = None
-            
+
             # Expiry tracking
             has_expiry = st.checkbox("Has Expiry Date", value=False)
-            
+
             expiry_date = None
             if has_expiry:
                 expiry_date = st.date_input(
@@ -623,33 +648,33 @@ def show_add_stock_tab(username: str):
                     value=date.today() + timedelta(days=180),
                     min_value=date.today()
                 )
-            
+
             notes = st.text_area(
                 "Notes",
                 placeholder="Additional notes about this stock entry...",
                 height=100
             )
-        
+
         # Submit button
         st.markdown("---")
         col1, col2, col3 = st.columns([2, 1, 1])
-        
+
         with col3:
             submitted = st.form_submit_button("✅ Add Stock", type="primary", width='stretch')
-        
+
         if submitted:
             # Validate
             errors = []
-            
+
             if not batch_number or len(batch_number.strip()) < 3:
                 errors.append("Batch number is required (minimum 3 characters)")
-            
+
             if quantity <= 0:
                 errors.append("Quantity must be greater than 0")
-            
+
             if unit_cost <= 0:
                 errors.append("Unit cost must be greater than 0")
-            
+
             if errors:
                 for error in errors:
                     st.error(f"❌ {error}")
@@ -667,10 +692,10 @@ def show_add_stock_tab(username: str):
                         notes=notes.strip() if notes else None,
                         username=username
                     )
-                
+
                 if success:
-                    st.success(f"✅ Successfully added {quantity} {selected_item.get('unit', '')} of {selected_item['item_name']}")
-                    
+                    st.success(f"✅ Successfully added {quantity} {unit} of {selected_item['item_name']}")
+
                     # Log activity
                     ActivityLogger.log(
                         user_id=st.session_state.user['id'],
@@ -1975,19 +2000,141 @@ def show_edit_supplier(username: str):
 
 def show_analytics_tab(username: str):
     """Analytics and reports (Admin only)"""
-    
+
     st.markdown("### 📈 Analytics & Reports")
-    
-    subtabs = st.tabs(["📊 Consumption", "💰 Cost Analysis", "📉 Trends"])
-    
+
+    subtabs = st.tabs(["💰 Inventory Value", "📊 Consumption", "📈 Cost Analysis", "📉 Trends"])
+
     with subtabs[0]:
-        show_consumption_analytics()
-    
+        show_inventory_value_analytics()
+
     with subtabs[1]:
-        show_cost_analysis()
-    
+        show_consumption_analytics()
+
     with subtabs[2]:
+        show_cost_analysis()
+
+    with subtabs[3]:
         show_trends_analytics()
+
+
+def show_inventory_value_analytics():
+    """Show total inventory value and statistics"""
+
+    st.markdown("#### 💰 Inventory Valuation")
+
+    with st.spinner("Calculating inventory value..."):
+        # Get all stock batches with costs (only active batches with remaining qty)
+        batches = InventoryDB.get_all_batches(active_only=True)
+
+        if not batches:
+            st.info("No stock data available")
+            return
+
+        df = pd.DataFrame(batches)
+
+        # batch_value is already calculated in get_all_batches() using remaining_qty
+        # If not present, calculate it
+        if 'batch_value' not in df.columns:
+            df['batch_value'] = df['remaining_qty'] * df['unit_cost']
+
+        # Summary metrics
+        col1, col2, col3, col4 = st.columns(4)
+
+        with col1:
+            total_value = df['batch_value'].sum()
+            st.metric(
+                label="💵 Total Inventory Value",
+                value=f"₹{total_value:,.2f}",
+                help="Total value of all stock on hand"
+            )
+
+        with col2:
+            avg_value = df['batch_value'].mean()
+            st.metric(
+                label="📊 Avg Batch Value",
+                value=f"₹{avg_value:,.2f}",
+                help="Average value per batch"
+            )
+
+        with col3:
+            total_items = df['item_name'].nunique()
+            st.metric(
+                label="📦 Unique Items",
+                value=total_items,
+                help="Number of different items in stock"
+            )
+
+        with col4:
+            total_batches = len(df)
+            st.metric(
+                label="🏷️ Total Batches",
+                value=total_batches,
+                help="Number of stock batches"
+            )
+
+        st.markdown("---")
+
+        # Value breakdown by item
+        st.markdown("##### 💰 Value by Item")
+
+        # Use remaining_qty for current stock value
+        qty_col = 'remaining_qty' if 'remaining_qty' in df.columns else 'quantity'
+        item_values = df.groupby('item_name').agg({
+            'batch_value': 'sum',
+            qty_col: 'sum',
+            'unit_cost': 'mean'
+        }).reset_index()
+
+        # Rename the quantity column
+        item_values.columns = ['item_name', 'batch_value', 'quantity', 'unit_cost']
+
+        item_values = item_values.sort_values('batch_value', ascending=False)
+        item_values['batch_value'] = item_values['batch_value'].apply(lambda x: f"₹{x:,.2f}")
+        item_values['unit_cost'] = item_values['unit_cost'].apply(lambda x: f"₹{x:,.2f}")
+        item_values['quantity'] = item_values['quantity'].apply(lambda x: f"{x:,.2f}")
+
+        item_values.columns = ['Item Name', 'Total Value', 'Total Quantity', 'Avg Unit Cost']
+
+        st.dataframe(item_values, width='stretch', hide_index=True, height=400)
+
+        # Export option
+        st.markdown("---")
+        col1, col2, col3 = st.columns([2, 1, 1])
+        with col2:
+            if st.button("📥 Export to Excel", width='stretch', key="export_inventory_value"):
+                from io import BytesIO
+                import openpyxl
+                from openpyxl.utils.dataframe import dataframe_to_rows
+
+                # Create Excel file
+                output = BytesIO()
+
+                # Convert formatted strings back to numbers for Excel
+                df_export = df.copy()
+                df_export = df_export[['item_name', 'batch_number', 'quantity', 'unit_cost', 'batch_value', 'purchase_date']]
+                df_export.columns = ['Item Name', 'Batch Number', 'Quantity', 'Unit Cost', 'Total Value', 'Purchase Date']
+
+                with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                    df_export.to_excel(writer, sheet_name='Inventory Value', index=False)
+                    item_values_export = df.groupby('item_name').agg({
+                        'batch_value': 'sum',
+                        'quantity': 'sum',
+                        'unit_cost': 'mean'
+                    }).reset_index()
+                    item_values_export.columns = ['Item Name', 'Total Value', 'Total Quantity', 'Avg Unit Cost']
+                    item_values_export.to_excel(writer, sheet_name='Value Summary', index=False)
+
+                output.seek(0)
+
+                st.download_button(
+                    label="📥 Download Excel",
+                    data=output,
+                    file_name=f"inventory_value_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    width='stretch',
+                    key="download_inventory_value_excel"
+                )
 
 
 def show_consumption_analytics():
