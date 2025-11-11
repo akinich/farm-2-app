@@ -85,7 +85,7 @@ def handle_forgot_password(email: str):
             db = Database.get_client()
 
             # Send password reset email
-            db.auth.reset_password_email(email)
+            response = db.auth.reset_password_email(email)
 
             st.success("✅ Password reset link sent! Check your email.")
             st.info("**Important:** After clicking the reset link in your email:\n\n"
@@ -97,10 +97,44 @@ def handle_forgot_password(email: str):
 
         except Exception as e:
             error_msg = str(e)
-            if "User not found" in error_msg or "not found" in error_msg.lower():
-                st.error("❌ No account found with this email address")
-            else:
-                st.error(f"❌ Error sending reset link: {error_msg}")
+            st.error(f"❌ Error sending reset link: {error_msg}")
+
+            # Provide detailed troubleshooting
+            with st.expander("🔍 Troubleshooting SMTP Issues", expanded=True):
+                st.markdown("""
+**Common Zoho SMTP Issues:**
+
+1. **App-Specific Password Required**
+   - Zoho requires app-specific passwords for SMTP
+   - Go to: Zoho Mail → Security → App Passwords
+   - Generate a new app password and use that instead of your regular password
+
+2. **SMTP Settings for Zoho:**
+   - **Host:** `smtp.zoho.com` (or `smtp.zoho.in` for India, `smtp.zoho.eu` for Europe)
+   - **Port:** `465` (SSL) or `587` (TLS)
+   - **Username:** Your full email address (e.g., `you@yourdomain.com`)
+   - **Password:** App-specific password (NOT your regular login password)
+
+3. **Sender Email Address:**
+   - The "From" email must match your Zoho account email
+   - Or must be an alias/domain verified in your Zoho account
+
+4. **Email Exists?**
+   - Make sure the email address `{email}` is registered in the system
+   - Try logging in first to verify the account exists
+
+5. **Supabase Auth Settings:**
+   - In Supabase Dashboard → Authentication → Email Templates
+   - Verify "Site URL" is set to: `https://farm2app.streamlit.app`
+   - Verify "Redirect URLs" includes: `https://farm2app.streamlit.app/*`
+
+**Test Your SMTP:**
+- Send a test email from Supabase Dashboard → Authentication → Email Templates
+- Click "Send test email" to verify SMTP is working
+                """)
+
+                st.warning("💡 **Quick Fix:** Try using Supabase's default email service first to test if password reset logic works, then switch back to Zoho once SMTP is configured correctly.")
+
 
 
 def extract_recovery_token():
