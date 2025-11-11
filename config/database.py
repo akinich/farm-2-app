@@ -388,11 +388,22 @@ class UserDB:
 
         except Exception as sql_error:
             error_msg = str(sql_error)
-            if "function" in error_msg.lower() and "does not exist" in error_msg.lower():
-                st.error("❌ SQL function not found")
-                st.info("""
-**To enable SQL user creation:**
-Run this SQL in Supabase SQL Editor, then try again:
+            if ("function" in error_msg.lower() and "does not exist" in error_msg.lower()) or \
+               ("could not find" in error_msg.lower() and "function" in error_msg.lower()):
+                st.error("❌ SQL function not found in database")
+                st.warning("⚠️ You need to create the user creation function in Supabase first")
+                st.markdown("""
+**📋 Steps to enable SQL user creation:**
+
+1. Open your **Supabase Dashboard** → **SQL Editor**
+2. Create a **new query**
+3. **Copy and paste** the SQL code below
+4. Click **Run** (or press Ctrl+Enter)
+5. Come back here and **try creating the user again**
+
+---
+
+**SQL Code to Run:**
 
 ```sql
 CREATE OR REPLACE FUNCTION create_user_with_password(
@@ -446,6 +457,15 @@ BEGIN
 END;
 $$;
 ```
+
+---
+
+**✅ After running the SQL:**
+- Refresh this page
+- Try creating the user again
+- The function will now work automatically
+
+**💡 Alternative:** Configure a custom SMTP server in Supabase Authentication settings to avoid needing this SQL function.
                 """)
                 return False
             else:
