@@ -264,8 +264,8 @@ class UserDB:
     @staticmethod
     def create_user(email: str, full_name: str, role_id: int) -> bool:
         """
-        Create user with SQL fallback (works with Supabase default email)
-        Tries Auth API first, falls back to direct SQL if blocked
+        Create user using Supabase Auth API
+        Requires custom SMTP to be configured in Supabase
         """
         try:
             db = Database.get_client()
@@ -276,8 +276,7 @@ class UserDB:
                 for _ in range(20)
             )
 
-            # Try Auth API first
-            auth_response = None
+            # Create user via Auth API
             try:
                 auth_response = db.auth.admin.create_user({
                     "email": email,
@@ -298,14 +297,10 @@ class UserDB:
                 elif "invalid email" in error_msg_lower:
                     st.error(f"❌ Invalid email format: {email}")
                     return False
-                elif "user not allowed" in error_msg_lower or "not allowed" in error_msg_lower:
-                    # Supabase default email blocks admin.create_user - use SQL fallback
-                    st.info("⚙️ Using direct SQL user creation (Supabase default email detected)...")
-                    return UserDB._create_user_sql(db, email, temp_password, full_name, role_id)
                 else:
                     st.error(f"❌ Auth error: {error_msg}")
-                    st.info("⚙️ Trying SQL fallback...")
-                    return UserDB._create_user_sql(db, email, temp_password, full_name, role_id)
+                    st.info("💡 If you see 'User not allowed' error, configure custom SMTP in Supabase → Authentication → Email Templates → SMTP Settings")
+                    return False
 
             # Auth API succeeded
             if auth_response and auth_response.user:
