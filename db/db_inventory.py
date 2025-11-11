@@ -1194,7 +1194,7 @@ class InventoryDB:
             po_item = {
                 'po_id': po_id,
                 'item_master_id': item_master_id,
-                'quantity_ordered': quantity,
+                'ordered_qty': quantity,  # Changed from quantity_ordered to ordered_qty
                 'unit_cost': unit_cost
             }
 
@@ -1259,9 +1259,9 @@ class InventoryDB:
                             po['unit'] = first_item['item_master'].get('unit', '')
 
                         # Calculate totals from items
-                        po['quantity'] = sum(item.get('quantity_ordered', 0) for item in items_response.data)
+                        po['quantity'] = sum(item.get('ordered_qty', 0) for item in items_response.data)
                         po['unit_cost'] = items_response.data[0].get('unit_cost', 0) if items_response.data else 0
-                        po['total_cost'] = sum(item.get('quantity_ordered', 0) * item.get('unit_cost', 0) for item in items_response.data)
+                        po['total_cost'] = sum(item.get('ordered_qty', 0) * item.get('unit_cost', 0) for item in items_response.data)
 
                         # If multiple items, append count
                         if len(items_response.data) > 1:
@@ -1369,8 +1369,8 @@ class InventoryDB:
             po['items'] = items
 
             # Calculate totals
-            po['total_quantity'] = sum(item.get('quantity_ordered', 0) for item in items)
-            po['total_cost'] = sum(item.get('quantity_ordered', 0) * item.get('unit_cost', 0) for item in items)
+            po['total_quantity'] = sum(item.get('ordered_qty', 0) for item in items)
+            po['total_cost'] = sum(item.get('ordered_qty', 0) * item.get('unit_cost', 0) for item in items)
 
             return po
 

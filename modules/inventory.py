@@ -1014,11 +1014,11 @@ def show_po_details(po: Dict, is_admin: bool, username: str):
             item_row = {
                 'Item Name': item.get('item_name', 'N/A'),
                 'SKU': item.get('sku', 'N/A'),
-                'Quantity': f"{item.get('quantity_ordered', 0):.2f} {item.get('unit', '')}"
+                'Quantity': f"{item.get('ordered_qty', 0):.2f} {item.get('unit', '')}"
             }
             if is_admin:
                 item_row['Unit Cost'] = f"₹{item.get('unit_cost', 0):.2f}"
-                item_row['Total'] = f"₹{item.get('quantity_ordered', 0) * item.get('unit_cost', 0):,.2f}"
+                item_row['Total'] = f"₹{item.get('ordered_qty', 0) * item.get('unit_cost', 0):,.2f}"
 
             items_data.append(item_row)
 
@@ -1116,12 +1116,12 @@ def show_po_details(po: Dict, is_admin: bool, username: str):
                     item_data = {
                         'Item Name': item.get('item_name', 'N/A'),
                         'SKU': item.get('sku', 'N/A'),
-                        'Quantity': item.get('quantity_ordered', 0),
+                        'Quantity': item.get('ordered_qty', 0),
                         'Unit': item.get('unit', '')
                     }
                     if is_admin:
                         item_data['Unit Cost'] = item.get('unit_cost', 0)
-                        item_data['Total Cost'] = item.get('quantity_ordered', 0) * item.get('unit_cost', 0)
+                        item_data['Total Cost'] = item.get('ordered_qty', 0) * item.get('unit_cost', 0)
 
                     items_export.append(item_data)
 
@@ -1146,134 +1146,235 @@ def show_po_details(po: Dict, is_admin: bool, username: str):
 
 
 def show_create_purchase_order(username: str):
-    """Create new purchase order"""
-    
+    """Create new purchase order with multiple items (invoice-style)"""
+
     st.markdown("#### ➕ Create Purchase Order")
-    
+
+    # Initialize session state for PO items
+    if 'po_items' not in st.session_state:
+        st.session_state.po_items = []
+    if 'po_number_draft' not in st.session_state:
+        st.session_state.po_number_draft = f"PO-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+
     master_items = InventoryDB.get_all_master_items(active_only=True)
-    for item in master_items:
-        if 'reorder_level' not in item and 'reorder_threshold' in item:
-            item['reorder_level'] = item['reorder_threshold']
-        if 'default_supplier_id' not in item and 'supplier_id' in item:
-            item['default_supplier_id'] = item['supplier_id']
     suppliers = InventoryDB.get_all_suppliers(active_only=True)
-    
+
     if not master_items:
         st.warning("⚠️ No active items in master list")
         return
-    
-    with st.form("create_po_form", clear_on_submit=True):
-        # Auto-generate PO number but make it editable
-        default_po_number = f"PO-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
-        po_number_input = st.text_input(
+
+    if not suppliers:
+        st.warning("⚠️ No active suppliers found")
+        return
+
+    # PO Header Section
+    st.markdown("##### 📋 PO Header")
+    col1, col2 = st.columns(2)
+
+    with col1:
+        po_number = st.text_input(
             "PO Number *",
-            value=default_po_number,
+            value=st.session_state.po_number_draft,
             help="Auto-generated, but you can edit it",
-            key="create_po_number"
+            key="po_header_number"
         )
 
-        col1, col2 = st.columns(2)
+        supplier_options = {s['supplier_name']: s for s in suppliers}
+        supplier_name = st.selectbox(
+            "Supplier *",
+            options=list(supplier_options.keys()),
+            key="po_header_supplier"
+        )
 
-        with col1:
-            # Item
-            item_options = {item['item_name']: item for item in master_items}
-            selected_item_name = st.selectbox(
-                "Select Item *",
-                options=list(item_options.keys()),
-                key="create_po_item_select"
-            )
-            selected_item = item_options[selected_item_name]
-            
-            # Supplier
-            supplier_options = ["Select Supplier"] + [s['supplier_name'] for s in suppliers]
-            supplier_name = st.selectbox(
-                "Supplier *",
-                options=supplier_options,
-                key="create_po_supplier_select"
-            )
-            
-            # Quantity
-            quantity = st.number_input(
-                f"Quantity ({selected_item.get('unit', '')}) *",
-                min_value=0.01,
-                step=0.01,
-                format="%.2f"
-            )
-            
-            # Unit cost - with dynamic unit display
-            item_unit = selected_item.get('unit', 'unit')
-            unit_cost = st.number_input(
-                f"Unit Cost (₹/{item_unit}) *",
-                min_value=0.01,
-                step=0.01,
-                format="%.2f"
-            )
-        
-        with col2:
-            # PO date
-            po_date = st.date_input("PO Date", value=date.today())
-            
-            # Expected delivery
-            expected_delivery = st.date_input(
-                "Expected Delivery",
-                value=date.today() + timedelta(days=7),
-                min_value=date.today()
-            )
-            
-            # Total cost (calculated)
-            total_cost = quantity * unit_cost
-            st.metric("Total Cost", f"₹{total_cost:,.2f}")
-            
-            # Notes
-            notes = st.text_area("Notes", height=100)
-        
-        # Submit
+    with col2:
+        po_date = st.date_input("PO Date *", value=date.today(), key="po_header_date")
+
+        expected_delivery = st.date_input(
+            "Expected Delivery *",
+            value=date.today() + timedelta(days=7),
+            min_value=date.today(),
+            key="po_header_delivery"
+        )
+
+    notes = st.text_area("Notes (optional)", height=80, key="po_header_notes")
+
+    st.markdown("---")
+
+    # Add Items Section
+    st.markdown("##### ➕ Add Items")
+
+    item_col1, item_col2, item_col3, item_col4 = st.columns([3, 2, 2, 1])
+
+    with item_col1:
+        item_options = {item['item_name']: item for item in master_items}
+        selected_item_name = st.selectbox(
+            "Select Item",
+            options=list(item_options.keys()),
+            key="add_item_select"
+        )
+        selected_item = item_options[selected_item_name]
+
+    with item_col2:
+        item_unit = selected_item.get('unit', 'unit')
+        quantity = st.number_input(
+            f"Quantity ({item_unit})",
+            min_value=0.01,
+            value=1.0,
+            step=0.01,
+            format="%.2f",
+            key="add_item_qty"
+        )
+
+    with item_col3:
+        unit_cost = st.number_input(
+            f"Unit Cost (₹/{item_unit})",
+            min_value=0.01,
+            value=1.0,
+            step=0.01,
+            format="%.2f",
+            key="add_item_cost"
+        )
+
+    with item_col4:
+        st.markdown("&nbsp;")
+        if st.button("➕ Add", key="add_item_btn", use_container_width=True):
+            # Add item to cart
+            new_item = {
+                'item_master_id': selected_item['id'],
+                'item_name': selected_item_name,
+                'sku': selected_item.get('sku', ''),
+                'unit': item_unit,
+                'ordered_qty': quantity,
+                'unit_cost': unit_cost,
+                'total': quantity * unit_cost
+            }
+            st.session_state.po_items.append(new_item)
+            st.rerun()
+
+    # Display Added Items
+    if st.session_state.po_items:
         st.markdown("---")
-        submitted = st.form_submit_button("✅ Create PO", type="primary", width='stretch')
-        
-        if submitted:
-            if supplier_name == "Select Supplier":
-                st.error("❌ Please select a supplier")
-            elif quantity <= 0:
-                st.error("❌ Quantity must be greater than 0")
-            elif unit_cost <= 0:
-                st.error("❌ Unit cost must be greater than 0")
-            elif not po_number_input or len(po_number_input.strip()) < 3:
-                st.error("❌ PO number is required")
-            else:
-                with st.spinner("Creating purchase order..."):
-                    success = InventoryDB.create_purchase_order(
-                        po_number=po_number_input.strip(),
-                        item_master_id=selected_item['id'],
-                        supplier_name=supplier_name,
-                        quantity=quantity,
-                        unit_cost=unit_cost,
-                        po_date=po_date,
-                        expected_delivery=expected_delivery,
-                        notes=notes.strip() if notes else None,
-                        username=st.session_state.user['id']  # Pass user_id (UUID) not display name
-                    )
-                
-                if success:
-                    st.success(f"✅ Purchase Order {po_number_input} created successfully!")
+        st.markdown("##### 📦 Items in PO")
 
-                    # Get user profile for full name
-                    user_profile = SessionManager.get_user_profile()
-                    full_name = user_profile.get('full_name', st.session_state.user.get('email', 'Unknown'))
+        # Calculate totals
+        total_items = len(st.session_state.po_items)
+        total_quantity = sum(item['ordered_qty'] for item in st.session_state.po_items)
+        grand_total = sum(item['total'] for item in st.session_state.po_items)
 
-                    ActivityLogger.log(
-                        user_id=st.session_state.user['id'],
-                        action_type='create_po',
-                        module_key='inventory',
-                        description=f"Created PO: {po_number_input} by {full_name}",
-                        metadata={'po_number': po_number_input, 'item': selected_item_name},
-                        user_email=st.session_state.user.get('email')
-                    )
-                    
-                    time.sleep(1)
+        # Show summary metrics
+        metric_col1, metric_col2, metric_col3 = st.columns(3)
+        with metric_col1:
+            st.metric("Total Items", total_items)
+        with metric_col2:
+            st.metric("Total Quantity", f"{total_quantity:.2f}")
+        with metric_col3:
+            st.metric("Grand Total", f"₹{grand_total:,.2f}")
+
+        # Display items table
+        items_display = []
+        for idx, item in enumerate(st.session_state.po_items):
+            items_display.append({
+                '#': idx + 1,
+                'Item Name': item['item_name'],
+                'SKU': item['sku'],
+                'Quantity': f"{item['ordered_qty']:.2f} {item['unit']}",
+                'Unit Cost': f"₹{item['unit_cost']:,.2f}",
+                'Total': f"₹{item['total']:,.2f}",
+                'Action': idx
+            })
+
+        df_display = pd.DataFrame(items_display)
+
+        # Display table without Action column (we'll add delete buttons separately)
+        st.dataframe(
+            df_display.drop('Action', axis=1),
+            hide_index=True,
+            use_container_width=True
+        )
+
+        # Delete buttons
+        st.markdown("**Remove Items:**")
+        delete_cols = st.columns(min(5, len(st.session_state.po_items)))
+        for idx, item in enumerate(st.session_state.po_items):
+            with delete_cols[idx % 5]:
+                if st.button(f"🗑️ #{idx+1}", key=f"delete_{idx}"):
+                    st.session_state.po_items.pop(idx)
                     st.rerun()
+
+        # Action buttons
+        st.markdown("---")
+        action_col1, action_col2, action_col3 = st.columns([1, 1, 2])
+
+        with action_col1:
+            if st.button("🗑️ Clear All", use_container_width=True):
+                st.session_state.po_items = []
+                st.rerun()
+
+        with action_col2:
+            if st.button("✅ Create PO", type="primary", use_container_width=True):
+                # Validate
+                if not po_number or len(po_number.strip()) < 3:
+                    st.error("❌ PO number is required")
+                elif not supplier_name:
+                    st.error("❌ Please select a supplier")
+                elif len(st.session_state.po_items) == 0:
+                    st.error("❌ Please add at least one item")
                 else:
-                    st.error("❌ Failed to create purchase order")
+                    # Create PO using the existing create_po function
+                    with st.spinner("Creating purchase order..."):
+                        supplier_id = supplier_options[supplier_name]['id']
+
+                        po_data = {
+                            'po_number': po_number.strip(),
+                            'supplier_id': supplier_id,
+                            'po_date': po_date.isoformat() if isinstance(po_date, date) else po_date,
+                            'expected_delivery': expected_delivery.isoformat() if isinstance(expected_delivery, date) else expected_delivery,
+                            'status': 'pending',
+                            'notes': notes.strip() if notes else None
+                        }
+
+                        # Prepare items for database
+                        po_items_data = []
+                        for item in st.session_state.po_items:
+                            po_items_data.append({
+                                'item_master_id': item['item_master_id'],
+                                'ordered_qty': item['ordered_qty'],
+                                'unit_cost': item['unit_cost']
+                            })
+
+                        po_id = InventoryDB.create_po(
+                            po_data=po_data,
+                            po_items=po_items_data,
+                            user_id=st.session_state.user['id']
+                        )
+
+                        if po_id:
+                            st.success(f"✅ Purchase Order {po_number} created successfully with {len(st.session_state.po_items)} items!")
+
+                            # Get user profile for full name
+                            user_profile = SessionManager.get_user_profile()
+                            full_name = user_profile.get('full_name', st.session_state.user.get('email', 'Unknown'))
+
+                            ActivityLogger.log(
+                                user_id=st.session_state.user['id'],
+                                action_type='create_po',
+                                module_key='inventory',
+                                description=f"Created PO: {po_number} with {len(st.session_state.po_items)} items by {full_name}",
+                                metadata={'po_number': po_number, 'items_count': len(st.session_state.po_items)},
+                                user_email=st.session_state.user.get('email')
+                            )
+
+                            # Clear session state
+                            st.session_state.po_items = []
+                            st.session_state.po_number_draft = f"PO-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+
+                            time.sleep(1)
+                            st.rerun()
+                        else:
+                            st.error("❌ Failed to create purchase order")
+
+    else:
+        st.info("ℹ️ No items added yet. Add items above to create a purchase order.")
 
 
 # =====================================================
