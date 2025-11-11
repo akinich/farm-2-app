@@ -53,7 +53,7 @@ def show():
             
             # Display preview
             with st.expander("Preview Data"):
-                st.dataframe(df.head(10), use_container_width=True)
+                st.dataframe(df.head(10), width='stretch')
             
             # Your processing logic here
             st.markdown("---")
