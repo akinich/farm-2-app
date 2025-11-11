@@ -614,7 +614,7 @@ def show_add_stock_tab(username: str):
                 options=supplier_list,
                 index=default_index,
                 help="Select supplier (auto-filled from item's default supplier)",
-                key="add_stock_supplier_select_form"
+                key=f"add_stock_supplier_{selected_item['id']}"
             )
 
             if supplier_name == "Select Supplier":

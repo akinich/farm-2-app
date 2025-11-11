@@ -1215,7 +1215,7 @@ class InventoryDB:
             since_date = datetime.now() - timedelta(days=days)
 
             query = db.table('purchase_orders') \
-                .select('*, suppliers(supplier_name), user_profiles!purchase_orders_created_by_fkey(full_name)') \
+                .select('*, suppliers(supplier_name)') \
                 .gte('po_date', since_date.date().isoformat()) \
                 .order('po_date', desc=True)
 
@@ -1229,11 +1229,20 @@ class InventoryDB:
             for po in pos:
                 if po.get('suppliers'):
                     po['supplier_name'] = po['suppliers']['supplier_name']
-                if po.get('user_profiles'):
-                    po['created_by'] = po['user_profiles']['full_name']
+
+                # Get user full name from created_by UUID
+                created_by_id = po.get('created_by')
+                if created_by_id:
+                    try:
+                        user_response = db.table('user_profiles').select('full_name').eq('id', created_by_id).execute()
+                        if user_response.data and len(user_response.data) > 0:
+                            po['created_by'] = user_response.data[0]['full_name']
+                        else:
+                            po['created_by'] = 'Unknown'
+                    except:
+                        po['created_by'] = 'Unknown'
                 else:
-                    # Fallback if profile not found
-                    po['created_by'] = po.get('created_by', 'Unknown')
+                    po['created_by'] = 'Unknown'
 
                 # Fetch items for this PO to get item name and totals
                 try:
