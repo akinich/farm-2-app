@@ -310,24 +310,7 @@ def show_dashboard_tab(username: str, is_admin: bool):
             len([e for e in expiring if e.get('days_until_expiry', 999) <= 30]),
             help="Items expiring in next 30 days"
         )
-    
-    # Show inventory value only to admin
-    if is_admin and 'total_inventory_value' in summary:
-        st.markdown("---")
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.metric(
-                "💰 Total Inventory Value",
-                f"₹{summary.get('total_inventory_value', 0):,.2f}",
-                help="Total value of all stock"
-            )
-        with col2:
-            st.metric(
-                "📊 Avg Item Value",
-                f"₹{summary.get('avg_item_value', 0):,.2f}",
-                help="Average value per item"
-            )
-    
+
     st.markdown("---")
     
     # Quick Alerts Section
@@ -571,21 +554,29 @@ def show_add_stock_tab(username: str):
 
     # Get suppliers for dropdown
     suppliers = InventoryDB.get_all_suppliers(active_only=True)
-    supplier_options = {s['supplier_name']: s['id'] for s in suppliers}
+    supplier_list = ["Select Supplier"] + [s['supplier_name'] for s in suppliers]
 
-    # Find default supplier index
-    default_supplier_name = None
+    # Find default supplier name for the selected item
+    default_supplier_name = "Select Supplier"
     if selected_item.get('default_supplier_id'):
         for supplier in suppliers:
             if supplier['id'] == selected_item['default_supplier_id']:
                 default_supplier_name = supplier['supplier_name']
                 break
 
-    # Build supplier dropdown list
-    supplier_list = ["Select Supplier"] + list(supplier_options.keys())
-    default_supplier_index = 0
-    if default_supplier_name and default_supplier_name in supplier_list:
-        default_supplier_index = supplier_list.index(default_supplier_name)
+    # Track which item we're currently looking at
+    if 'add_stock_current_item_id' not in st.session_state:
+        st.session_state.add_stock_current_item_id = selected_item['id']
+        st.session_state.add_stock_default_supplier = default_supplier_name
+    elif st.session_state.add_stock_current_item_id != selected_item['id']:
+        # Item changed, update the default supplier
+        st.session_state.add_stock_current_item_id = selected_item['id']
+        st.session_state.add_stock_default_supplier = default_supplier_name
+
+    # Find index for the default supplier
+    default_index = 0
+    if st.session_state.add_stock_default_supplier in supplier_list:
+        default_index = supplier_list.index(st.session_state.add_stock_default_supplier)
 
     with st.form("add_stock_form", clear_on_submit=True):
         col1, col2 = st.columns(2)
@@ -630,8 +621,8 @@ def show_add_stock_tab(username: str):
             supplier_name = st.selectbox(
                 "Supplier",
                 options=supplier_list,
-                index=default_supplier_index,
-                help="Select supplier (pre-filled with default if set)",
+                index=default_index,
+                help="Select supplier (auto-filled from item's default supplier)",
                 key="add_stock_supplier_select_form"
             )
 
@@ -708,9 +699,8 @@ def show_add_stock_tab(username: str):
                             'quantity': quantity
                         }
                     )
-                    
-                    st.balloons()
-                    time.sleep(1)
+
+                    time.sleep(0.5)
                     st.rerun()
                 else:
                     st.error("❌ Failed to add stock. Check if batch number already exists.")
