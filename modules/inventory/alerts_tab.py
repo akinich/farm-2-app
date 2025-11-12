@@ -1,13 +1,13 @@
 """
 Alerts Tab
 Display low stock and expiry alerts for inventory monitoring
-"""
 
 VERSION HISTORY:
 1.0.0 - 2025-01-12 - Initial modular version extracted from inventory.py
       - Low stock alerts with reorder thresholds
       - Expiry alerts (critical/warning/normal)
       - Alert categorization
+"""
 
 import streamlit as st
 import pandas as pd
