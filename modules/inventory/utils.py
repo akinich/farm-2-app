@@ -297,7 +297,8 @@ def init_po_session_state():
         from datetime import datetime
         st.session_state.po_number_draft = f"PO-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
 
-    if 'po_header_data' not in st.session_state:
+    # Check for both missing key AND None value (after clear_po_cart)
+    if 'po_header_data' not in st.session_state or st.session_state.po_header_data is None:
         from datetime import date, timedelta
         st.session_state.po_header_data = {
             'po_number': st.session_state.po_number_draft,
