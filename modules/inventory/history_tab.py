@@ -3,6 +3,12 @@ History Tab
 View and filter transaction history for all inventory operations
 """
 
+VERSION HISTORY:
+1.0.0 - 2025-01-12 - Initial modular version extracted from inventory.py
+      - Transaction filtering (type, item, date)
+      - Role-based column display
+      - Excel export capability
+
 import streamlit as st
 import pandas as pd
 

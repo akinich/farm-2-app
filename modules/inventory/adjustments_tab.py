@@ -3,6 +3,13 @@ Adjustments Tab
 Record stock adjustments for damage, wastage, corrections, etc.
 """
 
+VERSION HISTORY:
+1.0.0 - 2025-01-12 - Initial modular version extracted from inventory.py
+      - Stock adjustments (damage, wastage, corrections)
+      - Reason tracking
+      - Recent adjustments history
+      - Activity logging
+
 import streamlit as st
 import pandas as pd
 from datetime import date
