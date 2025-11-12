@@ -1,6 +1,13 @@
 """
 Constants for Inventory Management Module
 Centralized configuration and shared constants
+
+VERSION HISTORY:
+1.0.0 - 2025-01-12 - Initial modular version
+      - Centralized cache TTL settings
+      - Status values and pagination constants
+      - Column mappings for exports
+      - UI labels and status badge styling
 """
 
 # =====================================================

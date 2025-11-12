@@ -1,6 +1,13 @@
 """
 Shared Utilities for Inventory Management Module
 Cached data loaders, formatters, and common functions
+
+VERSION HISTORY:
+1.0.0 - 2025-01-12 - Initial modular version
+      - Cached data loaders (master items, suppliers, POs)
+      - Excel generation utilities
+      - UI formatters (status badges, currency)
+      - Session state helpers for PO management
 """
 
 import streamlit as st

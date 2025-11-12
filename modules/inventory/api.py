@@ -2,6 +2,14 @@
 Public API for Inventory Management Module
 Functions for cross-module communication (e.g., biofloc → inventory)
 
+VERSION HISTORY:
+1.0.0 - 2025-01-12 - Initial modular version
+      - use_stock_item(): FIFO stock deduction
+      - get_stock_level(): Current stock query
+      - get_item_by_name(): Item lookup
+      - add_stock_item(): Stock addition
+      - Query operations for items, alerts, history
+
 IMPORTANT: This is a PYTHON MODULE API, not a web API
 - ✅ Other Python modules can import and use these functions
 - ❌ NOT accessible over the internet

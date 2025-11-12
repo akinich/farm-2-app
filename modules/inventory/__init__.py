@@ -2,6 +2,13 @@
 Inventory Management Module
 Complete inventory system with batch tracking, FIFO, expiry management, and cost tracking
 
+VERSION HISTORY:
+3.0.0 - 2025-01-12 - Modular architecture refactoring
+      - Split monolithic inventory.py into separate tab modules
+      - Created public API for cross-module communication
+      - Improved code organization and maintainability
+      - Shared utilities and constants for DRY principle
+
 PUBLIC API for cross-module communication:
 - use_stock_item(): Deduct stock from inventory
 - add_stock_item(): Add stock to inventory
