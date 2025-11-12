@@ -1,7 +1,7 @@
 """
 Purchase Orders Tab
 Manage purchase orders with multi-item support, status tracking, and FIFO optimization
-"""
+
 
 VERSION HISTORY:
 1.0.0 - 2025-01-12 - Initial modular version extracted from inventory.py
@@ -10,7 +10,7 @@ VERSION HISTORY:
       - N+1 query optimization with caching
       - Delete PO functionality
       - Single-sheet Excel export
-
+"""
 import streamlit as st
 import pandas as pd
 from datetime import datetime, date, timedelta
