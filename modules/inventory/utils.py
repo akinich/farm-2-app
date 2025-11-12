@@ -321,3 +321,21 @@ def refresh_data_cache():
     get_po_details_cached.clear()
     get_categories_cached.clear()
     get_stock_batches_cached.clear()
+
+
+def export_to_excel(df: pd.DataFrame, filename_prefix: str):
+    """Export dataframe to Excel with download button"""
+    from datetime import datetime
+
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+        df.to_excel(writer, index=False, sheet_name='Data')
+
+    output.seek(0)
+
+    st.download_button(
+        label="📥 Download Excel",
+        data=output,
+        file_name=f"{filename_prefix}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
