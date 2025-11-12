@@ -1430,7 +1430,49 @@ class InventoryDB:
         except Exception as e:
             st.error(f"Error updating PO: {str(e)}")
             return False
-    
+
+    @staticmethod
+    def delete_po(po_id: int) -> bool:
+        """
+        Delete a purchase order and all its items
+        Only allows deleting pending POs
+        """
+        try:
+            db = Database.get_client()
+
+            # Check if PO is pending
+            po_response = db.table('purchase_orders') \
+                .select('status') \
+                .eq('id', po_id) \
+                .execute()
+
+            if not po_response.data:
+                st.error("PO not found")
+                return False
+
+            po_status = po_response.data[0].get('status')
+            if po_status != 'pending':
+                st.error(f"Cannot delete PO with status '{po_status}'. Only pending POs can be deleted.")
+                return False
+
+            # Delete PO items first (foreign key constraint)
+            db.table('purchase_order_items') \
+                .delete() \
+                .eq('po_id', po_id) \
+                .execute()
+
+            # Delete PO
+            db.table('purchase_orders') \
+                .delete() \
+                .eq('id', po_id) \
+                .execute()
+
+            return True
+
+        except Exception as e:
+            st.error(f"Error deleting PO: {str(e)}")
+            return False
+
     # =====================================================
     # ANALYTICS & REPORTS
     # =====================================================
