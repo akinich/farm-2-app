@@ -1,7 +1,6 @@
 """
 Current Stock Tab
 View current stock inventory with batch details and filtering
-"""
 
 VERSION HISTORY:
 1.0.0 - 2025-01-12 - Initial modular version extracted from inventory.py
@@ -9,6 +8,7 @@ VERSION HISTORY:
       - Batch detail view
       - Excel export
       - Summary statistics
+"""
 
 import streamlit as st
 import pandas as pd

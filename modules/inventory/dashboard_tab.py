@@ -1,13 +1,13 @@
 """
 Dashboard Tab
 KPIs, alerts, and quick stats for inventory overview
-"""
 
 VERSION HISTORY:
 1.0.0 - 2025-01-12 - Initial modular version extracted from inventory.py
       - KPI metrics display
       - Quick alerts (low stock and expiry)
       - Recent activity feed
+"""
 
 import streamlit as st
 import pandas as pd

@@ -1,7 +1,6 @@
 """
 Add Stock Tab
 Add new stock entries with batch tracking and FIFO support
-"""
 
 VERSION HISTORY:
 1.0.0 - 2025-01-12 - Initial modular version extracted from inventory.py
@@ -9,6 +8,7 @@ VERSION HISTORY:
       - Supplier management
       - Expiry date tracking
       - Form validation and activity logging
+"""
 
 import streamlit as st
 from datetime import date, timedelta
