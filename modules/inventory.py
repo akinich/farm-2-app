@@ -1284,8 +1284,48 @@ def show_po_details(po: Dict, is_admin: bool, username: str):
     if is_admin and po_full.get('status') == 'pending':
         with action_col4:
             st.markdown("**🗑️ Delete PO**")
-            if st.button("❌ Delete", key=f"delete_po_{po_id}", type="secondary"):
-                st.warning("⚠️ Delete functionality not implemented yet. Please cancel the PO instead.")
+
+            # Initialize confirmation state
+            confirm_key = f"confirm_delete_{po_id}"
+            if confirm_key not in st.session_state:
+                st.session_state[confirm_key] = False
+
+            # First click: Ask for confirmation
+            if not st.session_state[confirm_key]:
+                if st.button("❌ Delete", key=f"delete_po_{po_id}", type="secondary"):
+                    st.session_state[confirm_key] = True
+                    st.rerun()
+            # Second click: Confirm and delete
+            else:
+                st.warning("⚠️ Are you sure?")
+                col_a, col_b = st.columns(2)
+                with col_a:
+                    if st.button("✅ Yes, Delete", key=f"confirm_yes_{po_id}", type="primary"):
+                        with st.spinner("Deleting PO..."):
+                            if InventoryDB.delete_po(po_id):
+                                st.success(f"✅ PO {po_full.get('po_number')} deleted successfully!")
+
+                                # Log activity
+                                ActivityLogger.log(
+                                    user_id=st.session_state.user['id'],
+                                    action_type='delete_po',
+                                    module_key='inventory',
+                                    description=f"Deleted PO: {po_full.get('po_number')}",
+                                    metadata={'po_id': po_id, 'po_number': po_full.get('po_number')},
+                                    user_email=st.session_state.user.get('email')
+                                )
+
+                                # Clear confirmation state
+                                st.session_state[confirm_key] = False
+                                time.sleep(1)
+                                st.rerun()
+                            else:
+                                st.error("❌ Failed to delete PO")
+                                st.session_state[confirm_key] = False
+                with col_b:
+                    if st.button("❌ Cancel", key=f"confirm_no_{po_id}"):
+                        st.session_state[confirm_key] = False
+                        st.rerun()
 
 
 def show_create_purchase_order(username: str):
@@ -1431,6 +1471,7 @@ def show_add_item_section(master_items):
             }
             st.session_state.po_items.append(new_item)
             st.toast(f"✅ Added {selected_item_name}")
+            st.rerun()  # Force main page to update and show cart
 
 
 def show_po_cart(suppliers, supplier_options, username):
