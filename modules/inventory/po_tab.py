@@ -129,6 +129,12 @@ def show_all_purchase_orders(username: str, is_admin: bool):
 
     # Display each PO as an expandable card (paginated)
     for idx, po in enumerate(pos_page, start=start_idx + 1):
+        po_id = po.get('id')
+
+        # Check if this PO should stay expanded (during status change or delete operations)
+        expander_key = f"po_expanded_{po_id}"
+        is_expanded = st.session_state.get(expander_key, False)
+
         # Get status emoji and text for expander label (HTML won't render in expander)
         status = po.get('status', 'pending')
         status_emojis = {
@@ -145,7 +151,7 @@ def show_all_purchase_orders(username: str, is_admin: bool):
             f"📄 **{po.get('po_number', 'N/A')}** | {status_emoji} {status.upper()} | "
             f"{po.get('supplier_name', 'N/A')} | {po.get('item_name', 'N/A')} | "
             f"₹{po.get('total_cost', 0):,.2f}",
-            expanded=False
+            expanded=is_expanded
         ):
             show_po_details(po, is_admin, username)
 
@@ -231,25 +237,39 @@ def show_po_details(po: Dict, is_admin: bool, username: str):
             )
 
             if new_status != current_status:
+                # Keep expander open when dropdown changes
+                expander_key = f"po_expanded_{po_id}"
+                st.session_state[expander_key] = True
+
                 if st.button("✅ Update Status", key=f"update_status_{po_id}", type="primary"):
                     with st.spinner("Updating status..."):
-                        if InventoryDB.update_po_status(po_id, new_status):
-                            st.success(f"✅ Status updated to {new_status.upper()}")
+                        try:
+                            result = InventoryDB.update_po_status(po_id, new_status)
+                            if result:
+                                st.success(f"✅ Status updated from {current_status.upper()} to {new_status.upper()}")
 
-                            # Log activity
-                            ActivityLogger.log(
-                                user_id=st.session_state.user['id'],
-                                action_type='update_po_status',
-                                module_key='inventory',
-                                description=f"Updated PO {po_full.get('po_number')} status: {current_status} → {new_status}",
-                                metadata={'po_id': po_id, 'old_status': current_status, 'new_status': new_status},
-                                user_email=st.session_state.user.get('email')
-                            )
+                                # Log activity
+                                ActivityLogger.log(
+                                    user_id=st.session_state.user['id'],
+                                    action_type='update_po_status',
+                                    module_key='inventory',
+                                    description=f"Updated PO {po_full.get('po_number')} status: {current_status} → {new_status}",
+                                    metadata={'po_id': po_id, 'old_status': current_status, 'new_status': new_status},
+                                    user_email=st.session_state.user.get('email')
+                                )
 
-                            time.sleep(0.5)
-                            st.rerun()
-                        else:
-                            st.error("❌ Failed to update status")
+                                # Clear cache to reflect status change immediately
+                                refresh_data_cache()
+
+                                # Clear expander state so it closes after update
+                                st.session_state[expander_key] = False
+
+                                time.sleep(1)
+                                st.rerun()
+                            else:
+                                st.error(f"❌ Failed to update status from {current_status} to {new_status}. Check error message above.")
+                        except Exception as e:
+                            st.error(f"❌ Error updating status: {str(e)}")
 
     # Receive Stock Button (for ordered/received status)
     with action_col2:
@@ -296,40 +316,55 @@ def show_po_details(po: Dict, is_admin: bool, username: str):
             if not st.session_state[confirm_key]:
                 if st.button("❌ Delete", key=f"delete_po_{po_id}", type="secondary"):
                     st.session_state[confirm_key] = True
+                    # Keep expander open to show confirmation
+                    expander_key = f"po_expanded_{po_id}"
+                    st.session_state[expander_key] = True
                     st.rerun()
             # Second click: Confirm and delete
             else:
+                # Keep expander open during confirmation
+                expander_key = f"po_expanded_{po_id}"
+                st.session_state[expander_key] = True
+
                 st.warning("⚠️ Are you sure?")
                 col_a, col_b = st.columns(2)
                 with col_a:
                     if st.button("✅ Yes, Delete", key=f"confirm_yes_{po_id}", type="primary"):
                         with st.spinner("Deleting PO..."):
-                            if InventoryDB.delete_po(po_id):
-                                st.success(f"✅ PO {po_full.get('po_number')} deleted successfully!")
+                            try:
+                                result = InventoryDB.delete_po(po_id)
+                                if result:
+                                    st.success(f"✅ PO {po_full.get('po_number')} deleted successfully!")
 
-                                # Log activity
-                                ActivityLogger.log(
-                                    user_id=st.session_state.user['id'],
-                                    action_type='delete_po',
-                                    module_key='inventory',
-                                    description=f"Deleted PO: {po_full.get('po_number')}",
-                                    metadata={'po_id': po_id, 'po_number': po_full.get('po_number')},
-                                    user_email=st.session_state.user.get('email')
-                                )
+                                    # Log activity
+                                    ActivityLogger.log(
+                                        user_id=st.session_state.user['id'],
+                                        action_type='delete_po',
+                                        module_key='inventory',
+                                        description=f"Deleted PO: {po_full.get('po_number')}",
+                                        metadata={'po_id': po_id, 'po_number': po_full.get('po_number')},
+                                        user_email=st.session_state.user.get('email')
+                                    )
 
-                                # Clear cache to reflect deletion immediately
-                                refresh_data_cache()
+                                    # Clear cache to reflect deletion immediately
+                                    refresh_data_cache()
 
-                                # Clear confirmation state
-                                st.session_state[confirm_key] = False
-                                time.sleep(1)
-                                st.rerun()
-                            else:
-                                st.error("❌ Failed to delete PO")
+                                    # Clear confirmation and expander state
+                                    st.session_state[confirm_key] = False
+                                    st.session_state[expander_key] = False
+                                    time.sleep(1)
+                                    st.rerun()
+                                else:
+                                    st.error(f"❌ Failed to delete PO {po_full.get('po_number')}. Check error message above.")
+                                    st.session_state[confirm_key] = False
+                            except Exception as e:
+                                st.error(f"❌ Error deleting PO: {str(e)}")
                                 st.session_state[confirm_key] = False
                 with col_b:
                     if st.button("❌ Cancel", key=f"confirm_no_{po_id}"):
                         st.session_state[confirm_key] = False
+                        # Close expander on cancel
+                        st.session_state[expander_key] = False
                         st.rerun()
 
 
