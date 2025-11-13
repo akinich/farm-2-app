@@ -30,7 +30,8 @@ from .utils import (
     generate_po_detail_excel,
     get_status_badge,
     init_po_session_state,
-    clear_po_cart
+    clear_po_cart,
+    refresh_data_cache
 )
 from .constants import PO_PAGE_SIZE
 
@@ -128,8 +129,20 @@ def show_all_purchase_orders(username: str, is_admin: bool):
 
     # Display each PO as an expandable card (paginated)
     for idx, po in enumerate(pos_page, start=start_idx + 1):
+        # Get status emoji and text for expander label (HTML won't render in expander)
+        status = po.get('status', 'pending')
+        status_emojis = {
+            'pending': '⏳',
+            'approved': '✅',
+            'ordered': '📦',
+            'received': '✔️',
+            'closed': '🔒',
+            'cancelled': '❌'
+        }
+        status_emoji = status_emojis.get(status, '❓')
+
         with st.expander(
-            f"📄 **{po.get('po_number', 'N/A')}** | {get_status_badge(po.get('status', 'pending'))} | "
+            f"📄 **{po.get('po_number', 'N/A')}** | {status_emoji} {status.upper()} | "
             f"{po.get('supplier_name', 'N/A')} | {po.get('item_name', 'N/A')} | "
             f"₹{po.get('total_cost', 0):,.2f}",
             expanded=False
@@ -154,7 +167,7 @@ def show_po_details(po: Dict, is_admin: bool, username: str):
     with col1:
         st.markdown("#### 📋 PO Information")
         st.markdown(f"**PO Number:** {po_full.get('po_number', 'N/A')}")
-        st.markdown(f"**Status:** {get_status_badge(po_full.get('status', 'pending'))}")
+        st.markdown(f"**Status:** {get_status_badge(po_full.get('status', 'pending'))}", unsafe_allow_html=True)
         st.markdown(f"**PO Date:** {po_full.get('po_date', 'N/A')}")
         st.markdown(f"**Expected Delivery:** {po_full.get('expected_delivery', 'N/A')}")
         st.markdown(f"**Created By:** {po_full.get('created_by_name', 'Unknown')}")
@@ -303,6 +316,9 @@ def show_po_details(po: Dict, is_admin: bool, username: str):
                                     metadata={'po_id': po_id, 'po_number': po_full.get('po_number')},
                                     user_email=st.session_state.user.get('email')
                                 )
+
+                                # Clear cache to reflect deletion immediately
+                                refresh_data_cache()
 
                                 # Clear confirmation state
                                 st.session_state[confirm_key] = False
@@ -570,6 +586,9 @@ def show_po_cart(suppliers, supplier_options, username):
                             metadata={'po_number': po_number, 'items_count': len(st.session_state.po_items)},
                             user_email=st.session_state.user.get('email')
                         )
+
+                        # Clear cache to show new PO immediately
+                        refresh_data_cache()
 
                         # Clear session state
                         clear_po_cart()
